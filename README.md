@@ -3,7 +3,7 @@
 ![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-这是一个高性能的 BPF 字节码优化器，用 Go 重写了原始的 Python 版本。它实现了多种先进的优化技术来提高 BPF 程序的性能和代码紧凑性。
+这是一个高性能的 BPF 字节码优化器，用 Go 重写了原始的 Python 版本。它实现了多种先进的优化技术来提高 BPF 程序的性能和代码紧凑性。本项目将 [Merlin](https://github.com/4ar0nma0/Merlin) 的 Python 版本移植到了 Go 版本。
 
 ## 🚀 功能特点
 
