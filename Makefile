@@ -8,7 +8,7 @@ BINARY_NAME = bpf-optimizer
 
 # Go 相关配置
 GO = go
-GOFLAGS = -ldflags="-s -w -X main.VERSION=$(VERSION)"
+GOFLAGS = -tags=netgo,osusergo -gcflags "all=-N -l" -v
 GOBUILD = $(GO) build $(GOFLAGS)
 GOCLEAN = $(GO) clean
 GOTEST = $(GO) test
@@ -111,6 +111,9 @@ release: clean lint test build-all
 	@echo "🚀 生产环境构建完成"
 	@ls -la $(BUILD_DIR)/
 
+debug: build
+	@echo "🔧 开发模式运行..."
+	dlv --headless --listen=:2345 --api-version=2 exec ./build/bpf-optimizer -- -input /workload/tetragon/bpf/objs/bpf_generic_rawtp_v511.o -output test_optimized.o
 # 显示帮助
 help:
 	@echo "📖 BPF Optimizer 构建系统"

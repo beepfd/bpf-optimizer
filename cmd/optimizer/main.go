@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"net/http"
 	_ "net/http/pprof"
 
 	"github.com/beepfd/bpf-optimizer/pkg/optimizer"
@@ -60,6 +61,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "错误: 输入文件 '%s' 不存在\n", *inputFile)
 		os.Exit(1)
 	}
+
+	// add pprof
+	go func() {
+		http.ListenAndServe("0.0.0.0:6060", nil)
+	}()
 
 	// Perform optimization
 	if err := optimizeBPF(*inputFile, *outputFile); err != nil {

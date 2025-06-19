@@ -54,31 +54,17 @@ func NewSection(hexData, name string) (*Section, error) {
 }
 
 // buildDependencies builds the dependency graph for instructions
+// This is a complete implementation based on Python's build_dependency method
 func (s *Section) buildDependencies() {
-	// Implementation based on Python's build_dependency method
-	// This is a simplified version - full implementation would need
-	// comprehensive register and stack analysis
+	// Build control flow graph
+	cfg := s.buildControlFlowGraph()
 
-	for i := 0; i < len(s.Instructions); i++ {
-		inst := s.Instructions[i]
+	// Initialize register state
+	initialState := NewRegisterState()
 
-		// Basic dependency analysis
-		// Instructions that modify registers create dependencies
-		if inst.GetInstructionClass() == bpf.BPF_STX ||
-			inst.GetInstructionClass() == bpf.BPF_ST ||
-			inst.GetInstructionClass() == bpf.BPF_ALU ||
-			inst.GetInstructionClass() == bpf.BPF_ALU64 {
-
-			// Find instructions that use the same register
-			for j := i + 1; j < len(s.Instructions); j++ {
-				nextInst := s.Instructions[j]
-				if nextInst.DstReg == inst.DstReg || nextInst.SrcReg == inst.DstReg {
-					s.Dependencies[j].Dependencies = append(s.Dependencies[j].Dependencies, i)
-					s.Dependencies[i].DependedBy = append(s.Dependencies[i].DependedBy, j)
-				}
-			}
-		}
-	}
+	// Start dependency analysis from entry point
+	nodesDone := make(map[int]bool)
+	s.updateDependencies(cfg, 0, initialState, nodesDone)
 }
 
 // applyOptimizations applies all optimization techniques

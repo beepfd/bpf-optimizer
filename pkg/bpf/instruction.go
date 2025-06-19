@@ -46,6 +46,10 @@ func NewInstruction(hexStr string) (*Instruction, error) {
 	}
 	inst.Offset = int16(offsetBytes[0]) | (int16(offsetBytes[1]) << 8)
 
+	if inst.Offset < 0 {
+		fmt.Println(inst.Offset)
+	}
+
 	// Parse immediate (bytes 4-7, little endian)
 	immBytes, err := hex.DecodeString(hexStr[14:16] + hexStr[12:14] + hexStr[10:12] + hexStr[8:10])
 	if err != nil {
