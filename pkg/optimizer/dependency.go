@@ -1,6 +1,8 @@
 package optimizer
 
 import (
+	"sort"
+
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
 )
 
@@ -115,99 +117,17 @@ func (s *Section) analyzeInstruction(inst *bpf.Instruction) *InstructionAnalysis
 
 	switch lsb {
 	case bpf.BPF_ALU64, bpf.BPF_ALU:
-		msb := opcode & 0xF0
-		if msb == bpf.ALU_END { // byte exchange
-			analysis.UpdatedReg = dst
-			analysis.UsedReg = []int{dst}
-		} else if msb == bpf.ALU_MOV { // move
-			analysis.UpdatedReg = dst
-			if opcode&bpf.BPF_X == bpf.BPF_X {
-				analysis.UsedReg = []int{src}
-			}
-		} else { // regular arithmetic
-			analysis.UpdatedReg = dst
-			if opcode&bpf.BPF_X == bpf.BPF_X { // use register
-				analysis.UsedReg = []int{dst, src}
-			} else { // use immediate
-				analysis.UsedReg = []int{dst}
-			}
-		}
-
+		analysis.ALU(opcode, dst, src)
 	case bpf.BPF_JMP32, bpf.BPF_JMP:
-		msb := opcode & 0xF0
-		if msb == bpf.JMP_CALL {
-			analysis.IsCall = true
-			analysis.UpdatedReg = 0
-
-			// Handle different BPF helper functions
-			switch imm {
-			case 12: // tail call
-				analysis.UsedReg = []int{1, 2, 3}
-				analysis.UsedStack = []int16{0, 0}
-			case 1, 3, 23, 44: // map lookup, delete
-				analysis.UsedReg = []int{1, 2}
-			case 2, 69: // map update
-				analysis.UsedReg = []int{1, 2, 3, 4}
-			case 4, 51: // map lookup
-				analysis.UsedReg = []int{1, 2, 3}
-			case 5, 7, 8: // various helpers
-				// only updates r0
-			case 9, 10, 11: // complex helpers
-				analysis.UsedReg = []int{1, 2, 3, 4, 5}
-			default:
-				analysis.UsedReg = []int{1, 2, 3, 4, 5}
-			}
-		} else if msb == bpf.JMP_EXIT {
-			analysis.UsedReg = []int{0}
-			analysis.IsExit = true
-		} else if opcode == 0x05 { // unconditional jump
-			analysis.Offset = off
-		} else { // conditional jump
-			analysis.UsedReg = []int{dst, src}
-			analysis.Offset = off
-		}
-
+		analysis.JMP(opcode, dst, src, off, imm)
 	case bpf.BPF_STX: // store register to memory
-		msb := opcode & 0xE0
-		if msb == bpf.BPF_MEM || msb == bpf.BPF_MEMSX || msb == bpf.BPF_ATOMIC {
-			size := int16(1 << ((opcode & 0x18) >> 3))
-			if dst == 10 { // stack pointer
-				analysis.UpdatedStack = []int16{off, size}
-				analysis.UsedReg = []int{src}
-			} else {
-				analysis.UsedReg = []int{src}
-			}
-		}
-
+		analysis.STX(opcode, dst, src, off, imm)
 	case bpf.BPF_ST: // store immediate to memory
-		msb := opcode & 0xE0
-		if msb == bpf.BPF_MEM || msb == bpf.BPF_MEMSX || msb == bpf.BPF_ATOMIC {
-			size := int16(1 << ((opcode & 0x18) >> 3))
-			if dst == 10 { // stack pointer
-				analysis.UpdatedStack = []int16{off, size}
-			}
-		}
-
+		analysis.ST(opcode, dst, src, off, imm)
 	case bpf.BPF_LDX: // load from memory to register
-		msb := opcode & 0xE0
-		if msb == bpf.BPF_MEM || msb == bpf.BPF_MEMSX {
-			size := int16(1 << ((opcode & 0x18) >> 3))
-			analysis.UpdatedReg = dst
-			if src == 10 { // stack pointer
-				analysis.UsedStack = []int16{off, size}
-			} else {
-				analysis.UsedReg = []int{src}
-			}
-		}
-
+		analysis.LDX(opcode, dst, src, off, imm)
 	case bpf.BPF_LD: // load immediate to register
-		msb := opcode & 0xE0
-		if msb == bpf.BPF_IMM {
-			analysis.UpdatedReg = dst
-		} else if msb == bpf.BPF_ABS || msb == bpf.BPF_IND {
-			analysis.UpdatedReg = dst
-			analysis.UsedReg = []int{src}
-		}
+		analysis.LD(opcode, dst, src, off, imm)
 	}
 
 	return analysis
@@ -235,9 +155,11 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 			if msb == bpf.JMP_CALL {
 				continue
 			}
-			if msb == bpf.JMP_EXIT {
+
+			switch msb {
+			case bpf.JMP_EXIT:
 				cfg.Nodes[currentNode] = []int{}
-			} else if opcode == 0x05 { // unconditional jump
+			case 0x05: // unconditional jump
 				jumpTarget := i + int(off) + 1
 				// Only add valid jump targets (within bounds)
 				if jumpTarget >= 0 && jumpTarget < len(s.Instructions) {
@@ -245,7 +167,7 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 				} else {
 					cfg.Nodes[currentNode] = []int{} // Invalid jump target treated as exit
 				}
-			} else { // conditional jump
+			default: // conditional jump
 				cfg.Nodes[currentNode] = []int{i}
 				jumpTarget := i + int(off) + 1
 				fallThrough := i + 1
@@ -288,17 +210,101 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 	}
 	allNodes = append(allNodes, 0, len(s.Instructions))
 
-	// Sort nodes
-	for i := 0; i < len(allNodes); i++ {
-		for j := i + 1; j < len(allNodes); j++ {
-			if allNodes[i] > allNodes[j] {
-				allNodes[i], allNodes[j] = allNodes[j], allNodes[i]
+	// Sort nodes efficiently using Go's built-in sort
+	sort.Ints(allNodes)
+
+	for i := 0; i < len(allNodes)-1; i++ {
+		cfg.NodesLen[allNodes[i]] = allNodes[i+1] - allNodes[i]
+	}
+
+	// Build detailed reverse mapping by analyzing each instruction in each basic block
+	// This corresponds to Python's detailed nodes_rev construction (lines 512-533)
+	cfg.NodesRev = make(map[int][]int)
+	for _, node := range allNodes[:len(allNodes)-1] { // exclude the last virtual node
+		cfg.NodesRev[node] = make([]int, 0)
+	}
+
+	// Remove the virtual end node if it exists
+	delete(cfg.NodesRev, len(s.Instructions))
+
+	// Analyze each instruction in each basic block
+	for node, nodeLen := range cfg.NodesLen {
+		for i := 0; i < nodeLen; i++ {
+			instIdx := node + i
+			if instIdx >= len(s.Instructions) {
+				break
+			}
+
+			inst := s.Instructions[instIdx]
+			opcode := inst.Opcode
+			off := inst.Offset
+			msb := opcode & 0xF0
+
+			// Handle jump instructions
+			if (opcode&0x07) == bpf.BPF_JMP || (opcode&0x07) == bpf.BPF_JMP32 {
+				if msb == bpf.JMP_CALL {
+					// Function calls don't create control flow edges
+				} else if msb == bpf.JMP_EXIT {
+					// Exit instructions don't have successors
+					continue
+				} else if opcode == 0x05 { // Unconditional jump
+					jumpTarget := instIdx + int(off) + 1
+					if jumpTarget >= 0 && jumpTarget < len(s.Instructions) {
+						// Record that 'node' jumps to 'jumpTarget'
+						if _, exists := cfg.NodesRev[jumpTarget]; exists {
+							cfg.NodesRev[jumpTarget] = append(cfg.NodesRev[jumpTarget], node)
+						}
+					}
+					continue
+				} else { // Conditional jump
+					jumpTarget := instIdx + int(off) + 1
+					fallThrough := instIdx + 1
+
+					// Record jump target
+					if jumpTarget >= 0 && jumpTarget < len(s.Instructions) {
+						if _, exists := cfg.NodesRev[jumpTarget]; exists {
+							cfg.NodesRev[jumpTarget] = append(cfg.NodesRev[jumpTarget], instIdx)
+						}
+					}
+					// Record fall-through
+					if fallThrough >= 0 && fallThrough < len(s.Instructions) {
+						if _, exists := cfg.NodesRev[fallThrough]; exists {
+							cfg.NodesRev[fallThrough] = append(cfg.NodesRev[fallThrough], instIdx)
+						}
+					}
+					continue
+				}
+			}
+
+			// Handle sequential flow at the end of basic blocks
+			if i == nodeLen-1 && node+nodeLen < len(s.Instructions) {
+				nextBasicBlock := node + nodeLen
+				if _, exists := cfg.NodesRev[nextBasicBlock]; exists {
+					cfg.NodesRev[nextBasicBlock] = append(cfg.NodesRev[nextBasicBlock], node)
+				}
 			}
 		}
 	}
 
-	for i := 0; i < len(allNodes)-1; i++ {
-		cfg.NodesLen[allNodes[i]] = allNodes[i+1] - allNodes[i]
+	// Update forward edges based on detailed reverse mapping
+	// This ensures consistency between Nodes and NodesRev
+	for target, sources := range cfg.NodesRev {
+		for _, source := range sources {
+			if _, exists := cfg.Nodes[source]; !exists {
+				cfg.Nodes[source] = make([]int, 0)
+			}
+			// Check if target is not already in the successor list
+			found := false
+			for _, succ := range cfg.Nodes[source] {
+				if succ == target {
+					found = true
+					break
+				}
+			}
+			if !found {
+				cfg.Nodes[source] = append(cfg.Nodes[source], target)
+			}
+		}
 	}
 
 	return cfg

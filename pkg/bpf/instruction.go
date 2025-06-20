@@ -1,9 +1,7 @@
 package bpf
 
 import (
-	"encoding/hex"
 	"fmt"
-	"strconv"
 )
 
 // Instruction represents a BPF instruction (16 bytes)
@@ -24,38 +22,38 @@ func NewInstruction(hexStr string) (*Instruction, error) {
 
 	inst := &Instruction{Raw: hexStr}
 
+	// eBPF 指令格式
+	// 62  0a  fc  ff  00  00  00  00
+	// |   |   |   |   |             |
+	// |   |   |   |   +--- 立即数 (32位)
+	// |   |   +---+------- 偏移量 (16位)
+	// |   +--------------- 寄存器字段 (4位src + 4位dst)
+	// +------------------- 操作码 (8位)
+
 	// Parse opcode (first byte)
-	opcode, err := strconv.ParseUint(hexStr[0:2], 16, 8)
+	var err error
+	inst.Opcode, err = parseOpcode(hexStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse opcode: %v", err)
 	}
-	inst.Opcode = uint8(opcode)
 
 	// Parse registers (second byte)
-	regs, err := strconv.ParseUint(hexStr[2:4], 16, 8)
+	inst.DstReg, inst.SrcReg, err = parseRegisters(hexStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse registers: %v", err)
 	}
-	inst.DstReg = uint8(regs & 0x0F)
-	inst.SrcReg = uint8((regs & 0xF0) >> 4)
 
 	// Parse offset (bytes 2-3, little endian)
-	offsetBytes, err := hex.DecodeString(hexStr[6:8] + hexStr[4:6])
+	inst.Offset, err = parseOffset(hexStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse offset: %v", err)
 	}
-	inst.Offset = int16(offsetBytes[0]) | (int16(offsetBytes[1]) << 8)
-
-	if inst.Offset < 0 {
-		fmt.Println(inst.Offset)
-	}
 
 	// Parse immediate (bytes 4-7, little endian)
-	immBytes, err := hex.DecodeString(hexStr[14:16] + hexStr[12:14] + hexStr[10:12] + hexStr[8:10])
+	inst.Imm, err = parseImmediate(hexStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse immediate: %v", err)
 	}
-	inst.Imm = int32(immBytes[0]) | (int32(immBytes[1]) << 8) | (int32(immBytes[2]) << 16) | (int32(immBytes[3]) << 24)
 
 	return inst, nil
 }
