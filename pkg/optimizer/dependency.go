@@ -96,7 +96,7 @@ func toSigned(value uint32, bits int) int32 {
 
 // analyzeInstruction analyzes a single BPF instruction
 // This corresponds to Python's analyse_insn method
-func (s *Section) analyzeInstruction(inst *bpf.Instruction) *InstructionAnalysis {
+func analyzeInstruction(inst *bpf.Instruction) *InstructionAnalysis {
 	analysis := &InstructionAnalysis{
 		UpdatedReg:   -1,
 		UpdatedStack: make([]int16, 0),
@@ -334,7 +334,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			continue
 		}
 
-		analysis := s.analyzeInstruction(inst)
+		analysis := analyzeInstruction(inst)
 
 		// Handle register alias updates
 		if inst.Opcode != 0xBF && inst.Opcode != 0x07 {
