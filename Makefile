@@ -87,6 +87,74 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@echo "✅ 清理完成"
 
+# 构建调试版本
+debug: 
+	@echo "🔧 构建调试版本..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -gcflags="all=-N -l" -o $(BUILD_DIR)/$(BINARY_NAME)-debug ./cmd/optimizer
+	@echo "✅ 调试版本构建完成: $(BUILD_DIR)/$(BINARY_NAME)-debug"
+	@echo "使用方法:"
+	@echo "  1. VS Code调试: 按F5选择调试配置"
+	@echo "  2. 命令行调试: dlv exec ./$(BUILD_DIR)/$(BINARY_NAME)-debug"
+	@echo "  3. 远程调试: dlv --listen=:2345 --headless=true --api-version=2 exec ./$(BUILD_DIR)/$(BINARY_NAME)-debug"
+
+# 使用race检测器构建
+debug-race:
+	@echo "🔧 构建竞态检测版本..."
+	@mkdir -p $(BUILD_DIR)
+	@GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -race -gcflags="all=-N -l" -o $(BUILD_DIR)/$(BINARY_NAME)-race ./cmd/optimizer
+	@echo "✅ 竞态检测版本构建完成: $(BUILD_DIR)/$(BINARY_NAME)-race"
+
+# 启动调试服务器
+debug-server: debug
+	@echo "🔧 启动调试服务器..."
+	@echo "调试服务器将在 :2345 端口启动"
+	@echo "可以在另一个终端或VS Code中连接到此服务器"
+	dlv --listen=:2345 --headless=true --api-version=2 --accept-multiclient exec ./$(BUILD_DIR)/$(BINARY_NAME)-debug
+
+# 交互式调试
+debug-interactive: debug
+	@echo "🔧 启动交互式调试..."
+	dlv exec ./$(BUILD_DIR)/$(BINARY_NAME)-debug
+
+# 调试测试
+debug-test:
+	@echo "🔧 调试测试..."
+	@echo "调试包: $(shell pwd)/pkg/bpf"
+	dlv test ./pkg/bpf
+
+# 调试指定测试
+debug-test-specific:
+	@echo "🔧 调试指定测试..."
+	@read -p "输入测试函数名: " test_name; \
+	read -p "输入包路径 (默认: ./pkg/bpf): " pkg_path; \
+	pkg_path=$${pkg_path:-./pkg/bpf}; \
+	echo "调试测试: $$test_name 在包: $$pkg_path"; \
+	dlv test $$pkg_path -- -test.run "^$$test_name$$" -test.v
+
+# 调试所有测试
+debug-test-all:
+	@echo "🔧 调试所有测试..."
+	dlv test ./...
+
+# 调试基准测试
+debug-benchmark:
+	@echo "🔧 调试基准测试..."
+	@read -p "输入基准测试模式 (默认: .): " bench_pattern; \
+	read -p "输入包路径 (默认: ./pkg/bpf): " pkg_path; \
+	bench_pattern=$${bench_pattern:-.}; \
+	pkg_path=$${pkg_path:-./pkg/bpf}; \
+	echo "调试基准测试: $$bench_pattern 在包: $$pkg_path"; \
+	dlv test $$pkg_path -- -test.bench "$$bench_pattern" -test.benchmem -test.v
+
+# 调试测试覆盖率
+debug-test-coverage:
+	@echo "🔧 调试测试覆盖率..."
+	@read -p "输入包路径 (默认: ./pkg/bpf): " pkg_path; \
+	pkg_path=$${pkg_path:-./pkg/bpf}; \
+	echo "调试测试覆盖率在包: $$pkg_path"; \
+	dlv test $$pkg_path -- -test.cover -test.v
+
 # 显示项目信息
 info:
 	@echo "📋 项目信息:"
@@ -94,6 +162,7 @@ info:
 	@echo "  版本: $(VERSION)"
 	@echo "  Go版本: $(shell go version)"
 	@echo "  目标平台: $(GOOS)/$(GOARCH)"
+	@echo "  Delve版本: $(shell dlv version 2>/dev/null | head -1 || echo '未安装')"
 
 # 运行示例
 demo: build
@@ -111,28 +180,43 @@ release: clean lint test build-all
 	@echo "🚀 生产环境构建完成"
 	@ls -la $(BUILD_DIR)/
 
-debug: build
-	@echo "🔧 开发模式运行..."
-	dlv --headless --listen=:2345 --api-version=2 exec ./build/bpf-optimizer -- -input /workload/tetragon/bpf/objs/bpf_generic_rawtp_v511.o -output test_optimized.o
+
 # 显示帮助
 help:
 	@echo "📖 BPF Optimizer 构建系统"
 	@echo ""
-	@echo "可用目标:"
+	@echo "🔨 构建目标:"
 	@echo "  build        构建二进制文件"
 	@echo "  build-all    交叉编译所有平台"
-	@echo "  deps         安装依赖"
-	@echo "  test         运行测试"
-	@echo "  benchmark    运行基准测试"
+	@echo "  debug        构建调试版本"
+	@echo "  debug-race   构建竞态检测版本"
+	@echo "  release      生产环境构建"
+	@echo ""
+	@echo "🧪 测试目标:"
+	@echo "  test                运行测试"
+	@echo "  benchmark           运行基准测试"
+	@echo "  debug-test          调试BPF包测试"
+	@echo "  debug-test-specific 调试指定测试函数"
+	@echo "  debug-test-all      调试所有测试"
+	@echo "  debug-benchmark     调试基准测试"
+	@echo "  debug-test-coverage 调试测试覆盖率"
+	@echo ""
+	@echo "🔍 代码质量:"
 	@echo "  fmt          格式化代码"
 	@echo "  vet          代码静态检查"
 	@echo "  lint         代码质量检查"
+	@echo ""
+	@echo "🐛 调试工具:"
+	@echo "  debug-interactive  交互式调试"
+	@echo "  debug-server       启动调试服务器(:2345)"
+	@echo ""
+	@echo "🛠️  其他:"
+	@echo "  deps         安装依赖"
 	@echo "  install      安装到系统"
 	@echo "  clean        清理构建文件"
 	@echo "  info         显示项目信息"
 	@echo "  demo         运行演示"
 	@echo "  dev          开发模式运行"
-	@echo "  release      生产环境构建"
 	@echo "  help         显示此帮助信息"
 	@echo ""
 	@echo "环境变量:"

@@ -128,3 +128,5 @@ test_*.o
 # Temporary files
 tmp/
 temp/
+
+build/
