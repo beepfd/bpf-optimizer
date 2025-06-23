@@ -156,10 +156,9 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 				continue
 			}
 
-			switch msb {
-			case bpf.JMP_EXIT:
+			if msb == bpf.JMP_EXIT {
 				cfg.Nodes[currentNode] = []int{}
-			case 0x05: // unconditional jump
+			} else if opcode == 5 {
 				jumpTarget := i + int(off) + 1
 				// Only add valid jump targets (within bounds)
 				if jumpTarget >= 0 && jumpTarget < len(s.Instructions) {
@@ -167,7 +166,7 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 				} else {
 					cfg.Nodes[currentNode] = []int{} // Invalid jump target treated as exit
 				}
-			default: // conditional jump
+			} else {
 				cfg.Nodes[currentNode] = []int{i}
 				jumpTarget := i + int(off) + 1
 				fallThrough := i + 1
@@ -183,6 +182,7 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 				}
 				cfg.Nodes[i] = successors
 			}
+
 			currentNode = i + 1
 		}
 	}
@@ -338,9 +338,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 
 		// Handle register alias updates
 		if inst.Opcode != 0xBF && inst.Opcode != 0x07 {
-			if analysis.UpdatedReg >= 0 && analysis.UpdatedReg < 11 {
-				state.RegAlias[analysis.UpdatedReg] = -1
-			}
+			state.RegAlias[inst.DstReg] = -1
 		}
 
 		// Process used registers
@@ -350,16 +348,15 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			}
 
 			// Handle stack alias
+			// 如果使用了 R10 寄存器，则 R10 的别名是 R0，表示它现在指向栈顶
 			if regIdx == 10 {
-				if analysis.UpdatedReg >= 0 && analysis.UpdatedReg < 11 {
-					state.RegAlias[analysis.UpdatedReg] = 0
-				}
-			} else if analysis.UpdatedReg >= 0 && analysis.UpdatedReg < 11 && state.RegAlias[analysis.UpdatedReg] != -1 && inst.Opcode == 0x07 {
-				state.RegAlias[analysis.UpdatedReg] += int16(inst.Imm)
+				state.RegAlias[inst.DstReg] = 0
+				// 如果当前寄存器已知别名，且指令为 ALU64 或 ALU，则更新栈偏移计算
+			} else if state.RegAlias[inst.DstReg] != -1 && inst.Opcode == bpf.BPF_ALU64 {
+				state.RegAlias[inst.DstReg] += int16(inst.Imm)
+				// 0x85 = BPF_JMP + JMP_CALL = 0x05 + 0x80 = 0x85 是函数调用指令。
 			} else if inst.Opcode != 0x85 {
-				if analysis.UpdatedReg >= 0 && analysis.UpdatedReg < 11 {
-					state.RegAlias[analysis.UpdatedReg] = -1
-				}
+				state.RegAlias[inst.DstReg] = -1
 			}
 
 			// Add dependencies based on register usage
@@ -368,38 +365,39 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			}
 
 			for _, depInstIdx := range state.Registers[regIdx] {
-				if depInstIdx == -1 {
-					// Special case for initial state, skip
-					continue
-				}
-				if depInstIdx >= 0 && depInstIdx < len(s.Dependencies) {
-					if state.RegAlias[regIdx] != -1 && state.RegAlias[regIdx] != 0 {
-						// Handle stack dependencies through register aliases
-						if stackInsts, exists := state.Stacks[state.RegAlias[regIdx]]; exists {
-							for _, stackInstIdx := range stackInsts {
-								if stackInstIdx >= 0 && stackInstIdx < len(s.Dependencies) {
-									s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
-									s.Dependencies[stackInstIdx].DependedBy = append(s.Dependencies[stackInstIdx].DependedBy, instIdx)
-								}
-							}
-						} else {
-							state.Stacks[state.RegAlias[regIdx]] = []int{-1}
-							// Don't add -1 to dependencies array
+				if state.RegAlias[regIdx] != -1 && state.RegAlias[regIdx] != 0 {
+					// 情况1: 如果当前寄存器有别名，则将别名指向的栈偏移值添加到依赖关系中
+					if stackInsts, exists := state.Stacks[state.RegAlias[regIdx]]; exists {
+						for _, stackInstIdx := range stackInsts {
+							s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
+							s.Dependencies[stackInstIdx].DependedBy = append(s.Dependencies[stackInstIdx].DependedBy, instIdx)
 						}
+					} else {
+						// 情况2: 如果当前寄存器没有别名，则将别名指向的栈偏移值设置为 -1
+						state.Stacks[state.RegAlias[regIdx]] = []int{-1}
+						s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, -1)
 					}
-
-					s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, depInstIdx)
-					s.Dependencies[depInstIdx].DependedBy = append(s.Dependencies[depInstIdx].DependedBy, instIdx)
 				}
+
+				s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, depInstIdx)
+				s.Dependencies[depInstIdx].DependedBy = append(s.Dependencies[depInstIdx].DependedBy, instIdx)
 			}
 		}
 
 		// Update register state
-		if analysis.UpdatedReg >= 0 && analysis.UpdatedReg < 11 {
+		// 如果当前指令更新了寄存器，则将当前指令索引添加到寄存器状态中
+		if analysis.UpdatedReg >= 0 {
 			state.Registers[analysis.UpdatedReg] = []int{instIdx}
 		}
 
 		// Handle function calls
+		// 根据BPF ABI规范：
+		// R0: 函数返回值
+		// R1-R5: 函数参数传递
+		// R6-R9: 被调用者保存寄存器（callee-saved）
+		// R10: 只读栈指针
+		// R1-R5是scratch registers（临时寄存器）
+		// 函数调用之后，这些寄存器的值被认为是不可预测的，R1-R5 寄存器会被清空
 		if analysis.IsCall {
 			for j := 1; j <= 5; j++ { // r1-r5 are caller-saved
 				state.Registers[j] = make([]int, 0)
@@ -407,6 +405,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		}
 
 		// Handle stack updates
+		// 如果当前指令更新了栈，则将当前指令索引添加到栈状态中
 		if len(analysis.UpdatedStack) >= 2 {
 			offset := analysis.UpdatedStack[0]
 			state.Stacks[offset] = []int{instIdx}
@@ -441,14 +440,16 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 				}
 			} else {
 				state.Stacks[offset] = []int{-1}
-				// Don't add -1 to dependencies array
+				s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, -1)
 			}
 		}
 
 		// Handle exit instructions
 		if analysis.IsExit {
 			nodesDone[base] = true
-			return
+			if len(nodesDone) >= len(cfg.NodesRev) {
+				return
+			}
 		}
 	}
 
