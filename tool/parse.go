@@ -133,7 +133,6 @@ func CompareIntIntMap(got, want map[int]int) bool {
 			return false
 		}
 	}
-
 	return true
 }
 

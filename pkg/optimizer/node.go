@@ -1,7 +1,12 @@
 package optimizer
 
-import "github.com/beepfd/bpf-optimizer/pkg/bpf"
+import (
+	"sort"
 
+	"github.com/beepfd/bpf-optimizer/pkg/bpf"
+)
+
+// buildInstructionNode 构建前向映射
 func buildInstructionNode(insts []*bpf.Instruction, cfg *ControlFlowGraph) {
 	currentNode := 0
 	// First pass: identify basic block boundaries
@@ -45,4 +50,49 @@ func buildInstructionNode(insts []*bpf.Instruction, cfg *ControlFlowGraph) {
 		}
 	}
 
+}
+
+// buildInstructionNodeReverse 构建反向映射
+func buildInstructionNodeReverse(cfg *ControlFlowGraph) {
+	// Build reverse mapping
+	for key, successors := range cfg.Nodes {
+		if key != 0 {
+			if _, exists := cfg.NodesRev[key]; !exists {
+				cfg.NodesRev[key] = make([]int, 0)
+			}
+		}
+		for _, succ := range successors {
+			if _, exists := cfg.NodesRev[succ]; exists {
+				cfg.NodesRev[succ] = append(cfg.NodesRev[succ], key)
+			} else {
+				cfg.NodesRev[succ] = []int{key}
+			}
+		}
+	}
+}
+
+// buildInstructionNodeLength 构建节点长度映射
+func buildInstructionNodeLength(insts []*bpf.Instruction, cfg *ControlFlowGraph) {
+	allNodes := make([]int, 0)
+	for node := range cfg.NodesRev {
+		allNodes = append(allNodes, node)
+	}
+	allNodes = append(allNodes, 0, len(insts))
+
+	// Sort nodes efficiently using Go's built-in sort
+	sort.Ints(allNodes)
+
+	for i := 0; i < len(allNodes)-1; i++ {
+		cfg.NodesLen[allNodes[i]] = allNodes[i+1] - allNodes[i]
+	}
+
+	// Build detailed reverse mapping by analyzing each instruction in each basic block
+	// This corresponds to Python's detailed nodes_rev construction (lines 512-533)
+	cfg.NodesRev = make(map[int][]int)
+	for _, node := range allNodes[:len(allNodes)-1] { // exclude the last virtual node
+		cfg.NodesRev[node] = make([]int, 0)
+	}
+
+	// Remove the virtual end node if it exists
+	delete(cfg.NodesRev, len(insts))
 }

@@ -48,6 +48,9 @@ func Test_buildInstructionNode(t *testing.T) {
 			// 此处只需要测试第一个 section 的节点
 			// 因为该 section 为 .text 段，包含了所有函数
 			buildInstructionNode(sections[0].Instructions, cfg)
+			buildInstructionNodeReverse(cfg)
+			buildInstructionNodeLength(sections[0].Instructions, cfg)
+
 			got := cfg.Nodes
 			want := cfgs[0].Nodes
 			if !tool.CompareIntSliceMap(got, want) {
@@ -58,6 +61,15 @@ func Test_buildInstructionNode(t *testing.T) {
 				}
 			}
 
+			gotNodesLen := cfg.NodesLen
+			wantNodesLen := cfgs[0].NodesLen
+			if !tool.CompareIntIntMap(gotNodesLen, wantNodesLen) {
+				errors := []string{"NodesLen maps differ"}
+				errors = append(errors, tool.FormatIntMapDifference("NodesLen", gotNodesLen, wantNodesLen))
+				if len(errors) > 0 {
+					t.Errorf("ControlFlowGraph comparison failed: %v", errors)
+				}
+			}
 		})
 	}
 }
