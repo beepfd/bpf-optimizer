@@ -151,84 +151,10 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 	buildInstructionNodeLength(s.Instructions, cfg)
 
 	// Analyze each instruction in each basic block
-	for node, nodeLen := range cfg.NodesLen {
-		for i := 0; i < nodeLen; i++ {
-			instIdx := node + i
-			if instIdx >= len(s.Instructions) {
-				break
-			}
-
-			inst := s.Instructions[instIdx]
-			opcode := inst.Opcode
-			off := inst.Offset
-			msb := opcode & 0xF0
-
-			// Handle jump instructions
-			if (opcode&0x07) == bpf.BPF_JMP || (opcode&0x07) == bpf.BPF_JMP32 {
-				if msb == bpf.JMP_CALL {
-					// Function calls don't create control flow edges
-				} else if msb == bpf.JMP_EXIT {
-					// Exit instructions don't have successors
-					continue
-				} else if opcode == 0x05 { // Unconditional jump
-					jumpTarget := instIdx + int(off) + 1
-					if jumpTarget >= 0 && jumpTarget < len(s.Instructions) {
-						// Record that 'node' jumps to 'jumpTarget'
-						if _, exists := cfg.NodesRev[jumpTarget]; exists {
-							cfg.NodesRev[jumpTarget] = append(cfg.NodesRev[jumpTarget], node)
-						}
-					}
-					continue
-				} else { // Conditional jump
-					jumpTarget := instIdx + int(off) + 1
-					fallThrough := instIdx + 1
-
-					// Record jump target
-					if jumpTarget >= 0 && jumpTarget < len(s.Instructions) {
-						if _, exists := cfg.NodesRev[jumpTarget]; exists {
-							cfg.NodesRev[jumpTarget] = append(cfg.NodesRev[jumpTarget], instIdx)
-						}
-					}
-					// Record fall-through
-					if fallThrough >= 0 && fallThrough < len(s.Instructions) {
-						if _, exists := cfg.NodesRev[fallThrough]; exists {
-							cfg.NodesRev[fallThrough] = append(cfg.NodesRev[fallThrough], instIdx)
-						}
-					}
-					continue
-				}
-			}
-
-			// Handle sequential flow at the end of basic blocks
-			if i == nodeLen-1 && node+nodeLen < len(s.Instructions) {
-				nextBasicBlock := node + nodeLen
-				if _, exists := cfg.NodesRev[nextBasicBlock]; exists {
-					cfg.NodesRev[nextBasicBlock] = append(cfg.NodesRev[nextBasicBlock], node)
-				}
-			}
-		}
-	}
+	rebuildInstructionNodeRev(s.Instructions, cfg)
 
 	// Update forward edges based on detailed reverse mapping
-	// This ensures consistency between Nodes and NodesRev
-	for target, sources := range cfg.NodesRev {
-		for _, source := range sources {
-			if _, exists := cfg.Nodes[source]; !exists {
-				cfg.Nodes[source] = make([]int, 0)
-			}
-			// Check if target is not already in the successor list
-			found := false
-			for _, succ := range cfg.Nodes[source] {
-				if succ == target {
-					found = true
-					break
-				}
-			}
-			if !found {
-				cfg.Nodes[source] = append(cfg.Nodes[source], target)
-			}
-		}
-	}
+	updateInstructionNode(cfg)
 
 	return cfg
 }

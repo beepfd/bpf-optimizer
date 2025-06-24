@@ -12,44 +12,44 @@ func buildInstructionNode(insts []*bpf.Instruction, cfg *ControlFlowGraph) {
 	// First pass: identify basic block boundaries
 	for i, inst := range insts {
 		opcode := inst.Opcode
-		if (opcode&0x07) == bpf.BPF_JMP || (opcode&0x07) == bpf.BPF_JMP32 {
-			off := inst.Offset
-			msb := opcode & 0xF0
-			if msb == bpf.JMP_CALL {
-				continue
-			}
-
-			if msb == bpf.JMP_EXIT {
-				cfg.Nodes[currentNode] = []int{}
-			} else if opcode == 5 {
-				jumpTarget := i + int(off) + 1
-				// Only add valid jump targets (within bounds)
-				if jumpTarget >= 0 {
-					cfg.Nodes[currentNode] = []int{jumpTarget}
-				} else {
-					cfg.Nodes[currentNode] = []int{} // Invalid jump target treated as exit
-				}
-			} else {
-				cfg.Nodes[currentNode] = []int{i}
-				jumpTarget := i + int(off) + 1
-				fallThrough := i + 1
-
-				successors := make([]int, 0, 2)
-				// Add jump target if valid
-				if jumpTarget >= 0 {
-					successors = append(successors, jumpTarget)
-				}
-				// Add fall-through if valid
-				if fallThrough >= 0 {
-					successors = append(successors, fallThrough)
-				}
-				cfg.Nodes[i] = successors
-			}
-
-			currentNode = i + 1
+		if (opcode&0x07) != bpf.BPF_JMP && (opcode&0x07) != bpf.BPF_JMP32 {
+			continue
 		}
-	}
 
+		off := inst.Offset
+		msb := opcode & 0xF0
+		if msb == bpf.JMP_CALL {
+			continue
+		}
+
+		if msb == bpf.JMP_EXIT {
+			cfg.Nodes[currentNode] = []int{}
+		} else if opcode == 5 {
+			jumpTarget := i + int(off) + 1
+			// Only add valid jump targets (within bounds)
+			if jumpTarget >= 0 {
+				cfg.Nodes[currentNode] = []int{jumpTarget}
+			} else {
+				cfg.Nodes[currentNode] = []int{} // Invalid jump target treated as exit
+			}
+		} else {
+			cfg.Nodes[currentNode] = []int{i}
+			jumpTarget := i + int(off) + 1
+			fallThrough := i + 1
+
+			successors := make([]int, 0, 2)
+			// Add jump target if valid
+			if jumpTarget >= 0 {
+				successors = append(successors, jumpTarget)
+			}
+			// Add fall-through if valid
+			if fallThrough >= 0 {
+				successors = append(successors, fallThrough)
+			}
+			cfg.Nodes[i] = successors
+		}
+		currentNode = i + 1
+	}
 }
 
 // buildInstructionNodeReverse 构建反向映射
@@ -95,4 +95,92 @@ func buildInstructionNodeLength(insts []*bpf.Instruction, cfg *ControlFlowGraph)
 
 	// Remove the virtual end node if it exists
 	delete(cfg.NodesRev, len(insts))
+}
+
+// rebuildInstructionNodeRev 重建反向映射
+func rebuildInstructionNodeRev(insts []*bpf.Instruction, cfg *ControlFlowGraph) {
+	// Analyze each instruction in each basic block
+	for node, nodeLen := range cfg.NodesLen {
+		for i := 0; i < nodeLen; i++ {
+			instIdx := node + i
+			if instIdx >= len(insts) {
+				break
+			}
+
+			inst := insts[instIdx]
+			opcode := inst.Opcode
+			off := inst.Offset
+			msb := opcode & 0xF0
+
+			// Handle jump instructions
+			if (opcode&0x07) == bpf.BPF_JMP || (opcode&0x07) == bpf.BPF_JMP32 {
+				if msb == bpf.JMP_CALL {
+					// Function calls don't create control flow edges
+				} else if msb == bpf.JMP_EXIT {
+					// Exit instructions don't have successors
+					continue
+				} else if opcode == 0x05 { // Unconditional jump
+					jumpTarget := instIdx + int(off) + 1
+					if jumpTarget >= 0 && jumpTarget < len(insts) {
+						// Record that 'node' jumps to 'jumpTarget'
+						if _, exists := cfg.NodesRev[jumpTarget]; exists {
+							cfg.NodesRev[jumpTarget] = append(cfg.NodesRev[jumpTarget], node)
+						}
+					}
+					continue
+				} else { // Conditional jump
+					jumpTarget := instIdx + int(off) + 1
+					fallThrough := instIdx + 1
+
+					// Record jump target
+					if jumpTarget >= 0 && jumpTarget < len(insts) {
+						if _, exists := cfg.NodesRev[jumpTarget]; exists {
+							cfg.NodesRev[jumpTarget] = append(cfg.NodesRev[jumpTarget], instIdx)
+						}
+					}
+					// Record fall-through
+					if fallThrough >= 0 && fallThrough < len(insts) {
+						if _, exists := cfg.NodesRev[fallThrough]; exists {
+							cfg.NodesRev[fallThrough] = append(cfg.NodesRev[fallThrough], instIdx)
+						}
+					}
+					continue
+				}
+			}
+
+			// Handle sequential flow at the end of basic blocks
+			if i == nodeLen-1 && node+nodeLen < len(insts) {
+				nextBasicBlock := node + nodeLen
+				if _, exists := cfg.NodesRev[nextBasicBlock]; exists {
+					cfg.NodesRev[nextBasicBlock] = append(cfg.NodesRev[nextBasicBlock], node)
+				}
+			}
+		}
+	}
+}
+
+// updateInstructionNode 更新前向映射
+// 根据详细反向映射更新前向映射，确保 Nodes 和 NodesRev 的一致性
+func updateInstructionNode(cfg *ControlFlowGraph) {
+	for target, sources := range cfg.NodesRev {
+		if _, exists := cfg.Nodes[target]; !exists {
+			cfg.Nodes[target] = make([]int, 0)
+		}
+
+		for _, source := range sources {
+			// Check if target is not already in the successor list
+			found := false
+			for _, succ := range cfg.Nodes[source] {
+				if succ == target {
+					found = true
+					break
+				}
+			}
+			if !found {
+				cfg.Nodes[source] = append(cfg.Nodes[source], target)
+			}
+		}
+
+		sort.Ints(cfg.NodesRev[target])
+	}
 }
