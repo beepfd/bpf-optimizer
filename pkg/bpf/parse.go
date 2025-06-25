@@ -1,9 +1,13 @@
 package bpf
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 )
 
 // 解析操作码
@@ -74,4 +78,42 @@ func parseImmediate(hexStr string) (int32, error) {
 	}
 
 	return int32(immBytes[0]) | (int32(immBytes[1]) << 8) | (int32(immBytes[2]) << 16) | (int32(immBytes[3]) << 24), nil
+}
+
+func BuildTestInstructionFromFile(testFile string) (hexStr string, want []*Instruction) {
+	raw, err := os.ReadFile(testFile)
+	if err != nil {
+		panic(err)
+	}
+
+	want = make([]*Instruction, 0)
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	// b700000001000000,183,0,0,0,1
+	// hexStr: b700000001000000
+	// opcode: 183
+	// srcReg: 0
+	// dstReg: 0
+	// offset: 0
+	// imm: 1
+	for scanner.Scan() {
+		line := scanner.Text()
+		splited := strings.Split(line, ",")
+		hexStr += splited[0]
+
+		opcode, _ := strconv.ParseUint(splited[1], 10, 8)
+		srcReg, _ := strconv.ParseUint(splited[2], 10, 8)
+		dstReg, _ := strconv.ParseUint(splited[3], 10, 8)
+		offset, _ := strconv.ParseInt(splited[4], 10, 16)
+		imm, _ := strconv.ParseInt(splited[5], 10, 32)
+
+		want = append(want, &Instruction{
+			Raw:    splited[0],
+			Opcode: uint8(opcode),
+			SrcReg: uint8(srcReg),
+			DstReg: uint8(dstReg),
+			Offset: int16(offset),
+			Imm:    int32(imm),
+		})
+	}
+	return hexStr, want
 }
