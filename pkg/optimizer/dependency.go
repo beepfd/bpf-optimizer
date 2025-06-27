@@ -30,6 +30,40 @@ type ControlFlowGraph struct {
 	NodeStats map[int]*RegisterState // node -> register/stack state
 }
 
+// Clone creates a deep copy of the ControlFlowGraph
+func (cfg *ControlFlowGraph) Clone() *ControlFlowGraph {
+	newCfg := &ControlFlowGraph{
+		Nodes:     make(map[int][]int),
+		NodesRev:  make(map[int][]int),
+		NodesLen:  make(map[int]int),
+		NodeStats: make(map[int]*RegisterState),
+	}
+
+	// Copy Nodes
+	for nodeID, successors := range cfg.Nodes {
+		newCfg.Nodes[nodeID] = make([]int, len(successors))
+		copy(newCfg.Nodes[nodeID], successors)
+	}
+
+	// Copy NodesRev
+	for nodeID, predecessors := range cfg.NodesRev {
+		newCfg.NodesRev[nodeID] = make([]int, len(predecessors))
+		copy(newCfg.NodesRev[nodeID], predecessors)
+	}
+
+	// Copy NodesLen
+	for nodeID, length := range cfg.NodesLen {
+		newCfg.NodesLen[nodeID] = length
+	}
+
+	// Copy NodeStats
+	for nodeID, state := range cfg.NodeStats {
+		newCfg.NodeStats[nodeID] = state.Clone()
+	}
+
+	return newCfg
+}
+
 // NewRegisterState creates a new register state
 func NewRegisterState() *RegisterState {
 	rs := &RegisterState{
@@ -271,59 +305,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		loopInfo.Processed[base] = true
 	}
 
-	// Find next node to process
-	newBase := 0
-	var newState *RegisterState
-	// Look for ready nodes (all predecessors done)
-	// 以下代码主要用于寻找，前驱节点全部完成或者没有前驱节点的节点，作为下一个要处理的节点
-	for node := range cfg.NodesRev {
-		if nodesDone[node] {
-			continue
-		}
-
-		// Skip nodes containing BPF_EXIT instruction when in loop context (corresponds to Python's "9500000000000000" check)
-		if loopInfo != nil {
-			if nodeLen, exists := cfg.NodesLen[node]; exists {
-				skipNode := false
-				for i := 0; i < nodeLen; i++ {
-					instIdx := node + i
-					if instIdx < len(s.Instructions) {
-						inst := s.Instructions[instIdx]
-						// Check for BPF_EXIT instruction (opcode 0x95)
-						if inst.Opcode == 0x95 {
-							skipNode = true
-							break
-						}
-					}
-				}
-				if skipNode {
-					continue
-				}
-			}
-		}
-
-		// Check if all predecessors are done
-		allPredsDone := true
-		for _, pred := range cfg.NodesRev[node] {
-			if !nodesDone[pred] {
-				allPredsDone = false
-				break
-			}
-		}
-
-		if allPredsDone {
-			newBase = node
-			// Merge states from predecessors
-			var predStates []*RegisterState
-			for _, pred := range cfg.NodesRev[node] {
-				if predState, exists := cfg.NodeStats[pred]; exists {
-					predStates = append(predStates, predState)
-				}
-			}
-			newState = MergeRegisterStates(predStates)
-			break
-		}
-	}
+	newBase, newState := s.findNextNode(cfg, nodesDone, loopInfo, nil)
 
 	// If no ready node found, look for loops
 	if newBase == 0 {
