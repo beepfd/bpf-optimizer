@@ -360,11 +360,16 @@ func parseUpdatePropertyInitArgs(filename string) (*ControlFlowGraph, int, bool,
 		}
 	}
 
+	nodesStats, err := parseNodesStats(filename)
+	if err != nil {
+		return nil, 0, false, err
+	}
+
 	cfg := &ControlFlowGraph{
 		Nodes:     nodes,
 		NodesRev:  nodesRev,
 		NodesLen:  nodesLen,
-		NodeStats: make(map[int]*RegisterState),
+		NodeStats: nodesStats,
 	}
 
 	return cfg, base, inferOnly, scanner.Err()
@@ -741,4 +746,420 @@ func TestControlFlowGraphStructure(t *testing.T) {
 
 	t.Logf("节点长度分布: %v", lengthMap)
 	t.Logf("平均节点长度: %.2f", float64(totalLength)/float64(len(cfg.NodesLen)))
+}
+
+// 解析 nodes_stats 数据
+// 格式为 {0: [[[0], [2], [], [], [], [], [], [], [], [], [-1]], {}]}
+// [[0], [2], [], [], [], [], [], [], [], [], [-1]] 为 registers
+// {} 为 stacks
+// 返回 map[int]*RegisterState
+// parseNodesStats 解析 nodes_stats 数据并转换为 map[int]*RegisterState
+func parseNodesStats(filename string) (map[int]*RegisterState, error) {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	// 将内容转换为字符串并查找 nodes_stats
+	contentStr := string(content)
+
+	// 查找 nodes_stats = 的位置
+	prefix := "nodes_stats = "
+	startIndex := strings.Index(contentStr, prefix)
+	if startIndex == -1 {
+		return nil, fmt.Errorf("未找到 nodes_stats 定义")
+	}
+
+	// 提取 nodes_stats 的内容（从 { 开始到对应的 } 结束）
+	startIndex += len(prefix)
+	statsStr := extractDictContent(contentStr[startIndex:])
+	if statsStr == "" {
+		return nil, fmt.Errorf("无法提取 nodes_stats 内容")
+	}
+
+	nodesStats, err := parseNodesStatsData(statsStr)
+	if err != nil {
+		return nil, fmt.Errorf("解析 nodes_stats 失败: %v", err)
+	}
+
+	return nodesStats, nil
+}
+
+// extractDictContent 提取字典内容，从 { 开始到对应的 } 结束
+func extractDictContent(content string) string {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "{") {
+		return ""
+	}
+
+	braceCount := 0
+	for i, char := range content {
+		if char == '{' {
+			braceCount++
+		} else if char == '}' {
+			braceCount--
+			if braceCount == 0 {
+				return content[:i+1]
+			}
+		}
+	}
+	return ""
+}
+
+// parseNodesStatsData 解析 nodes_stats 的 Python 字典数据
+func parseNodesStatsData(data string) (map[int]*RegisterState, error) {
+	result := make(map[int]*RegisterState)
+
+	// 移除外层的大括号
+	data = strings.TrimSpace(data)
+	if !strings.HasPrefix(data, "{") || !strings.HasSuffix(data, "}") {
+		return nil, fmt.Errorf("无效的字典格式")
+	}
+	data = data[1 : len(data)-1]
+
+	// 使用简单的状态机解析嵌套结构
+	var bracketDepth int
+	var inString bool
+	var currentEntry strings.Builder
+
+	i := 0
+	for i < len(data) {
+		char := data[i]
+
+		switch char {
+		case '"', '\'':
+			inString = !inString
+			currentEntry.WriteByte(char)
+		case '{', '[':
+			if !inString {
+				bracketDepth++
+			}
+			currentEntry.WriteByte(char)
+		case '}', ']':
+			if !inString {
+				bracketDepth--
+			}
+			currentEntry.WriteByte(char)
+		case ',':
+			if !inString && bracketDepth == 0 {
+				// 处理完整的键值对
+				entry := strings.TrimSpace(currentEntry.String())
+				if entry != "" {
+					if err := parseNodeStatsEntry(entry, result); err != nil {
+						return nil, fmt.Errorf("解析节点状态条目失败: %v", err)
+					}
+				}
+				currentEntry.Reset()
+			} else {
+				currentEntry.WriteByte(char)
+			}
+		default:
+			currentEntry.WriteByte(char)
+		}
+		i++
+	}
+
+	// 处理最后一个条目
+	entry := strings.TrimSpace(currentEntry.String())
+	if entry != "" {
+		if err := parseNodeStatsEntry(entry, result); err != nil {
+			return nil, fmt.Errorf("解析最后节点状态条目失败: %v", err)
+		}
+	}
+
+	return result, nil
+}
+
+// parseNodeStatsEntry 解析单个节点状态条目
+func parseNodeStatsEntry(entry string, result map[int]*RegisterState) error {
+	// 分离键和值 "nodeId: [registers, stacks]"
+	colonIndex := strings.Index(entry, ":")
+	if colonIndex == -1 {
+		return fmt.Errorf("无效的键值对格式: %s", entry)
+	}
+
+	keyStr := strings.TrimSpace(entry[:colonIndex])
+	valueStr := strings.TrimSpace(entry[colonIndex+1:])
+
+	// 解析节点ID
+	nodeID, err := strconv.Atoi(keyStr)
+	if err != nil {
+		return fmt.Errorf("无效的节点ID: %s", keyStr)
+	}
+
+	// 解析值 [registers, stacks]
+	if !strings.HasPrefix(valueStr, "[") || !strings.HasSuffix(valueStr, "]") {
+		return fmt.Errorf("无效的值格式: %s", valueStr)
+	}
+
+	valueStr = valueStr[1 : len(valueStr)-1] // 移除外层方括号
+
+	// 找到寄存器和栈的分隔点
+	registerEnd := findRegisterArrayEnd(valueStr)
+	if registerEnd == -1 {
+		return fmt.Errorf("无法找到寄存器数组结束位置")
+	}
+
+	registersStr := strings.TrimSpace(valueStr[:registerEnd+1])
+	stacksStr := strings.TrimSpace(valueStr[registerEnd+2:]) // +2 跳过 "], "
+
+	// 解析寄存器状态
+	registers, err := parseRegisterArray(registersStr)
+	if err != nil {
+		return fmt.Errorf("解析寄存器状态失败: %v", err)
+	}
+
+	// 解析栈状态
+	stacks, err := parseStackDict(stacksStr)
+	if err != nil {
+		return fmt.Errorf("解析栈状态失败: %v", err)
+	}
+
+	// 创建 RegisterState
+	regState := &RegisterState{
+		Registers: registers,
+		Stacks:    stacks,
+		RegAlias:  make([]int16, 11), // 初始化为 11 个元素
+	}
+
+	// 初始化 RegAlias 为 -1
+	for i := range regState.RegAlias {
+		regState.RegAlias[i] = -1
+	}
+
+	result[nodeID] = regState
+	return nil
+}
+
+// findRegisterArrayEnd 找到寄存器数组的结束位置
+func findRegisterArrayEnd(data string) int {
+	bracketDepth := 0
+	inString := false
+
+	for i, char := range data {
+		switch char {
+		case '"', '\'':
+			inString = !inString
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
+		case ']':
+			if !inString {
+				bracketDepth--
+				if bracketDepth == 0 {
+					return i
+				}
+			}
+		}
+	}
+	return -1
+}
+
+// parseRegisterArray 解析寄存器数组 [[...], [...], ...]
+func parseRegisterArray(data string) ([][]int, error) {
+	// 移除外层方括号
+	if !strings.HasPrefix(data, "[") || !strings.HasSuffix(data, "]") {
+		return nil, fmt.Errorf("无效的数组格式: %s", data)
+	}
+	data = data[1 : len(data)-1]
+
+	var result [][]int
+	var currentArray strings.Builder
+	bracketDepth := 0
+	inString := false
+
+	for _, char := range data {
+		switch char {
+		case '"', '\'':
+			inString = !inString
+			currentArray.WriteRune(char)
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
+			currentArray.WriteRune(char)
+		case ']':
+			if !inString {
+				bracketDepth--
+			}
+			currentArray.WriteRune(char)
+			if bracketDepth == 0 {
+				// 解析单个寄存器数组
+				arrayStr := strings.TrimSpace(currentArray.String())
+				if arrayStr != "" {
+					regArray, err := parseIntArray(arrayStr)
+					if err != nil {
+						return nil, fmt.Errorf("解析寄存器数组失败: %v", err)
+					}
+					result = append(result, regArray)
+				}
+				currentArray.Reset()
+			}
+		case ',':
+			if !inString && bracketDepth == 0 {
+				// 跳过顶层逗号
+				continue
+			} else {
+				currentArray.WriteRune(char)
+			}
+		default:
+			currentArray.WriteRune(char)
+		}
+	}
+
+	// 处理最后一个数组（如果没有以逗号结尾）
+	if currentArray.Len() > 0 && bracketDepth == 0 {
+		arrayStr := strings.TrimSpace(currentArray.String())
+		if arrayStr != "" {
+			regArray, err := parseIntArray(arrayStr)
+			if err != nil {
+				return nil, fmt.Errorf("解析最后寄存器数组失败: %v", err)
+			}
+			result = append(result, regArray)
+		}
+	}
+
+	return result, nil
+}
+
+// parseIntArray 解析整数数组 [1, 2, 3]
+func parseIntArray(data string) ([]int, error) {
+	// 移除方括号
+	if !strings.HasPrefix(data, "[") || !strings.HasSuffix(data, "]") {
+		return nil, fmt.Errorf("无效的数组格式: %s", data)
+	}
+	data = data[1 : len(data)-1]
+	data = strings.TrimSpace(data)
+
+	if data == "" {
+		return []int{}, nil
+	}
+
+	var result []int
+	elements := strings.Split(data, ",")
+	for _, elem := range elements {
+		elem = strings.TrimSpace(elem)
+		if elem != "" {
+			num, err := strconv.Atoi(elem)
+			if err != nil {
+				return nil, fmt.Errorf("无效的整数: %s", elem)
+			}
+			result = append(result, num)
+		}
+	}
+
+	return result, nil
+}
+
+// parseStackDict 解析栈字典 {-8: [1, 2], -16: [3]}
+func parseStackDict(data string) (map[int16][]int, error) {
+	result := make(map[int16][]int)
+
+	// 移除外层大括号
+	if !strings.HasPrefix(data, "{") || !strings.HasSuffix(data, "}") {
+		return nil, fmt.Errorf("无效的字典格式: %s", data)
+	}
+	data = data[1 : len(data)-1]
+	data = strings.TrimSpace(data)
+
+	if data == "" {
+		return result, nil
+	}
+
+	// 简单解析键值对
+	var currentEntry strings.Builder
+	bracketDepth := 0
+	inString := false
+
+	for _, char := range data {
+		switch char {
+		case '"', '\'':
+			inString = !inString
+			currentEntry.WriteRune(char)
+		case '[':
+			if !inString {
+				bracketDepth++
+			}
+			currentEntry.WriteRune(char)
+		case ']':
+			if !inString {
+				bracketDepth--
+			}
+			currentEntry.WriteRune(char)
+		case ',':
+			if !inString && bracketDepth == 0 {
+				// 处理完整的键值对
+				entry := strings.TrimSpace(currentEntry.String())
+				if entry != "" {
+					if err := parseStackEntry(entry, result); err != nil {
+						return nil, fmt.Errorf("解析栈条目失败: %v", err)
+					}
+				}
+				currentEntry.Reset()
+			} else {
+				currentEntry.WriteRune(char)
+			}
+		default:
+			currentEntry.WriteRune(char)
+		}
+	}
+
+	// 处理最后一个条目
+	entry := strings.TrimSpace(currentEntry.String())
+	if entry != "" {
+		if err := parseStackEntry(entry, result); err != nil {
+			return nil, fmt.Errorf("解析最后栈条目失败: %v", err)
+		}
+	}
+
+	return result, nil
+}
+
+// parseStackEntry 解析单个栈条目 "-8: [1, 2]"
+func parseStackEntry(entry string, result map[int16][]int) error {
+	colonIndex := strings.Index(entry, ":")
+	if colonIndex == -1 {
+		return fmt.Errorf("无效的键值对格式: %s", entry)
+	}
+
+	keyStr := strings.TrimSpace(entry[:colonIndex])
+	valueStr := strings.TrimSpace(entry[colonIndex+1:])
+
+	// 解析偏移量
+	offset, err := strconv.ParseInt(keyStr, 10, 16)
+	if err != nil {
+		return fmt.Errorf("无效的栈偏移量: %s", keyStr)
+	}
+
+	// 解析依赖数组
+	deps, err := parseIntArray(valueStr)
+	if err != nil {
+		return fmt.Errorf("解析依赖数组失败: %v", err)
+	}
+
+	result[int16(offset)] = deps
+	return nil
+}
+
+// TestParseNodesStats 测试 nodes_stats 解析功能
+func TestParseNodesStats(t *testing.T) {
+	nodesStats, err := parseNodesStats("../../testdata/update_property_candidates_args")
+	if err != nil {
+		t.Skipf("跳过测试，无法解析 nodes_stats: %v", err)
+		return
+	}
+
+	t.Logf("成功解析 %d 个节点状态", len(nodesStats))
+
+	// 验证一些节点的数据
+	if regState, exists := nodesStats[0]; exists {
+		t.Logf("节点 0 寄存器状态: %v", regState.Registers)
+		t.Logf("节点 0 栈状态: %v", regState.Stacks)
+	}
+
+	if regState, exists := nodesStats[1656]; exists {
+		t.Logf("节点 1656 寄存器状态: %v", regState.Registers)
+		t.Logf("节点 1656 栈状态: %v", regState.Stacks)
+	}
 }
