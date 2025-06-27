@@ -305,7 +305,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		loopInfo.Processed[base] = true
 	}
 
-	newBase, newState := s.findNextNode(cfg, nodesDone, loopInfo, nil)
+	newBase, newState := s.findNextNode(cfg, nodesDone, loopInfo)
 
 	// If no ready node found, look for loops
 	if newBase == 0 {
