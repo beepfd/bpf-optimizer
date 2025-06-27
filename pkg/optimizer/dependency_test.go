@@ -1,7 +1,6 @@
 package optimizer
 
 import (
-	"bufio"
 	"debug/elf"
 	"encoding/hex"
 	"fmt"
@@ -316,11 +315,10 @@ func TestSection_updateDependencies(t *testing.T) {
 
 // parseUpdatePropertyInitArgs 解析 update_property_init_args 文件中的参数
 func parseUpdatePropertyInitArgs(filename string) (*ControlFlowGraph, int, bool, error) {
-	file, err := os.Open(filename)
+	content, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, 0, false, err
 	}
-	defer file.Close()
 
 	var nodes map[int][]int
 	var nodesRev map[int][]int
@@ -328,10 +326,15 @@ func parseUpdatePropertyInitArgs(filename string) (*ControlFlowGraph, int, bool,
 	var base int
 	var inferOnly bool
 
-	// 逐行读取文件
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	// 将内容转换为字符串并逐行处理
+	contentStr := string(content)
+	lines := strings.Split(contentStr, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
 
 		if strings.HasPrefix(line, "base = ") {
 			baseStr := strings.TrimPrefix(line, "base = ")
@@ -372,7 +375,7 @@ func parseUpdatePropertyInitArgs(filename string) (*ControlFlowGraph, int, bool,
 		NodeStats: nodesStats,
 	}
 
-	return cfg, base, inferOnly, scanner.Err()
+	return cfg, base, inferOnly, nil
 }
 
 // parseSinglePythonDictIntSlice 解析单行 Python 字典格式的字符串 (返回 map[int][]int)
