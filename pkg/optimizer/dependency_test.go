@@ -244,6 +244,24 @@ func compareControlFlowGraphs(got, want *ControlFlowGraph) []string {
 }
 
 func TestSection_updateDependencies(t *testing.T) {
+	cfg, base, inferOnly, err := parseUpdatePropertyInitArgs("../../testdata/update_property_init_args")
+	if err != nil {
+		t.Fatalf("Failed to parse update_property_init_args: %v", err)
+	}
+
+	insns, _ := loadAnalysisFromFile("../../testdata/analyz_result.csv")
+	insns = insns[0:2257]
+	section := &Section{
+		Instructions: insns,
+		Dependencies: make([]DependencyInfo, 0),
+	}
+	for i := 0; i < len(insns); i++ {
+		section.Dependencies = append(section.Dependencies, DependencyInfo{
+			Dependencies: make([]int, 0),
+			DependedBy:   make([]int, 0),
+		})
+	}
+
 	type fields struct {
 		Name         string
 		Instructions []*bpf.Instruction
@@ -267,16 +285,16 @@ func TestSection_updateDependencies(t *testing.T) {
 			name: "基于 update_property_init_args 参数的测试",
 			fields: fields{
 				Name:         "test_function",
-				Instructions: make([]*bpf.Instruction, 0),
-				Dependencies: make([]DependencyInfo, 0),
+				Instructions: section.Instructions,
+				Dependencies: section.Dependencies,
 			},
 			args: args{
-				cfg:       buildTestControlFlowGraph(),
-				base:      0,
+				cfg:       cfg,
+				base:      base,
 				state:     NewRegisterState(),
 				nodesDone: nil,
 				loopInfo:  nil,
-				inferOnly: false,
+				inferOnly: inferOnly,
 			},
 			want: NewRegisterState(),
 		},
@@ -291,6 +309,7 @@ func TestSection_updateDependencies(t *testing.T) {
 			s.updateDependencies(tt.args.cfg, tt.args.base, tt.args.state, tt.args.nodesDone, tt.args.loopInfo, tt.args.inferOnly)
 			// 由于 updateDependencies 现在是 void 函数，我们只验证它没有崩溃
 			// 可以在这里添加更多的状态验证逻辑
+			fmt.Println(tt.args.state)
 		})
 	}
 }
@@ -484,7 +503,7 @@ func TestParseUpdatePropertyInitArgs(t *testing.T) {
 	// 显示一些示例数据
 	sampleCount := 0
 	for nodeID, successors := range cfg.Nodes {
-		if sampleCount >= 5 {
+		if sampleCount >= 50 {
 			break
 		}
 		t.Logf("节点 %d -> %v", nodeID, successors)

@@ -161,14 +161,14 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 
 // updateDependencies performs the main dependency analysis
 // This corresponds to Python's update_property method
-func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *RegisterState, nodesDone map[int]bool) {
+func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *RegisterState, nodesDone map[int]bool, loopInfo *LoopInfo, inferOnly bool) *RegisterState {
 	if nodesDone == nil {
 		nodesDone = make(map[int]bool)
 	}
 
 	nodeLen, exists := cfg.NodesLen[base]
 	if !exists {
-		return
+		return state
 	}
 
 	// Process instructions in current basic block
@@ -176,12 +176,130 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 
 	// Store state for this node
 	cfg.NodeStats[base] = state.Clone()
+
+	if inferOnly {
+		return state
+	}
+
 	nodesDone[base] = true
 
-	// Process successor nodes
+	// Handle loop processing
+	if loopInfo != nil {
+		// Get predecessors of loop head
+		predecessors := make(map[int]bool)
+		if preds, exists := cfg.NodesRev[loopInfo.Head]; exists {
+			for _, pred := range preds {
+				predecessors[pred] = true
+			}
+		}
+
+		// Check if all predecessors are done
+		allPredsDone := true
+		for pred := range predecessors {
+			if !nodesDone[pred] {
+				allPredsDone = false
+				break
+			}
+		}
+
+		if allPredsDone {
+			// Collect states from all predecessors
+			var predStates []*RegisterState
+			for pred := range predecessors {
+				if predState, exists := cfg.NodeStats[pred]; exists {
+					predStates = append(predStates, predState)
+				}
+			}
+
+			// Merge predecessor states
+			mergedState := MergeRegisterStates(predStates)
+
+			// First, simulate loop execution to check convergence (corresponds to Python's infer_only=1)
+			simulatedState := s.updateDependencies(cfg, loopInfo.Head, mergedState.Clone(), nodesDone, loopInfo, true)
+
+			// Check for fixed point (convergence) by comparing simulated result
+			continueLoop := false
+			if loopHeadState, exists := cfg.NodeStats[loopInfo.Head]; exists {
+				if !simulatedState.IsEqual(loopHeadState) {
+					continueLoop = true
+				}
+			} else {
+				continueLoop = true
+			}
+
+			if continueLoop {
+				// Update loop head state
+				cfg.NodeStats[loopInfo.Head] = mergedState.Clone()
+
+				// Reset processed nodes in this loop iteration (corresponds to Python's nodes_done -= loop_info[3])
+				for node := range loopInfo.Processed {
+					delete(nodesDone, node)
+				}
+				loopInfo.Processed = make(map[int]bool)
+
+				// Reset waiting nodes in this loop iteration
+				for node := range loopInfo.Waiting {
+					delete(nodesDone, node)
+				}
+				loopInfo.Waiting = make(map[int]bool)
+
+				// Recursively process loop with updated state
+				return s.updateDependencies(cfg, loopInfo.Head, mergedState, nodesDone, loopInfo, false)
+			} else {
+				// Loop has converged, handle nested loop completion
+				if loopInfo.Parent != nil {
+					// Notify parent loop that this loop head is complete (corresponds to Python's loop_info[4][3].add(loop_info[0]))
+					delete(loopInfo.Parent.Waiting, loopInfo.Head)
+				}
+				nodesDone[loopInfo.Head] = true
+
+				// Continue with parent loop if it exists
+				if loopInfo.Parent != nil {
+					return s.updateDependencies(cfg, base, state, nodesDone, loopInfo.Parent, inferOnly)
+				}
+			}
+		} else {
+			// Not all predecessors are done, mark this node as waiting (corresponds to Python's loop_info[3].add(base))
+			loopInfo.Waiting[base] = true
+			return state
+		}
+
+	}
+
+	// Mark this node as processed in current loop iteration
+	if loopInfo != nil {
+		loopInfo.Processed[base] = true
+	}
+
+	// Find next node to process
+	newBase := 0
+	var newState *RegisterState
+	// Look for ready nodes (all predecessors done)
+	// 以下代码主要用于寻找，前驱节点全部完成或者没有前驱节点的节点，作为下一个要处理的节点
 	for node := range cfg.NodesRev {
 		if nodesDone[node] {
 			continue
+		}
+
+		// Skip nodes containing BPF_EXIT instruction when in loop context (corresponds to Python's "9500000000000000" check)
+		if loopInfo != nil {
+			if nodeLen, exists := cfg.NodesLen[node]; exists {
+				skipNode := false
+				for i := 0; i < nodeLen; i++ {
+					instIdx := node + i
+					if instIdx < len(s.Instructions) {
+						inst := s.Instructions[instIdx]
+						// Check for BPF_EXIT instruction (opcode 0x95)
+						if inst.Opcode == 0x95 {
+							skipNode = true
+							break
+						}
+					}
+				}
+				if skipNode {
+					continue
+				}
+			}
 		}
 
 		// Check if all predecessors are done
@@ -194,39 +312,47 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		}
 
 		if allPredsDone {
-			// Merge states from all predecessors
-			newState := NewRegisterState()
+			newBase = node
+			// Merge states from predecessors
+			var predStates []*RegisterState
 			for _, pred := range cfg.NodesRev[node] {
 				if predState, exists := cfg.NodeStats[pred]; exists {
-					// Merge register states
-					for i := 0; i < 11; i++ {
-						newState.Registers[i] = append(newState.Registers[i], predState.Registers[i]...)
-					}
-					// Merge stack states
-					for offset, stackInsts := range predState.Stacks {
-						if existing, exists := newState.Stacks[offset]; exists {
-							newState.Stacks[offset] = append(existing, stackInsts...)
-						} else {
-							newState.Stacks[offset] = make([]int, len(stackInsts))
-							copy(newState.Stacks[offset], stackInsts)
-						}
+					predStates = append(predStates, predState)
+				}
+			}
+			newState = MergeRegisterStates(predStates)
+			break
+		}
+	}
+
+	// If no ready node found, look for loops
+	if newBase == 0 {
+		loopHead := s.findLoopCandidates(cfg, nodesDone)
+		if loopHead != 0 {
+			// Create new loop info
+			newLoopInfo := NewLoopInfo(loopHead, loopInfo)
+
+			// Initialize loop state from predecessors
+			var predStates []*RegisterState
+			if preds, exists := cfg.NodesRev[loopHead]; exists {
+				for _, pred := range preds {
+					if predState, exists := cfg.NodeStats[pred]; exists {
+						predStates = append(predStates, predState)
 					}
 				}
 			}
 
-			// Remove duplicates
-			for i := 0; i < 11; i++ {
-				newState.Registers[i] = removeDuplicates(newState.Registers[i])
-			}
-			for offset := range newState.Stacks {
-				newState.Stacks[offset] = removeDuplicates(newState.Stacks[offset])
-			}
+			loopState := MergeRegisterStates(predStates)
 
-			// Recursively process this node
-			s.updateDependencies(cfg, node, newState, nodesDone)
-			break
+			// Process loop
+			return s.updateDependencies(cfg, loopHead, loopState, nodesDone, newLoopInfo, false)
 		}
+	} else if newBase != base {
+		// Continue with next node
+		return s.updateDependencies(cfg, newBase, newState, nodesDone, loopInfo, false)
 	}
+
+	return state
 }
 
 // removeDuplicates removes duplicate integers from a slice
