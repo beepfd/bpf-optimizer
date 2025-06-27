@@ -64,7 +64,7 @@ func (s *Section) buildDependencies() {
 
 	// Start dependency analysis from entry point
 	nodesDone := make(map[int]bool)
-	s.updateDependencies(cfg, 0, initialState, nodesDone)
+	s.updateDependencies(cfg, 0, initialState, nodesDone, nil, false)
 }
 
 // applyOptimizations applies all optimization techniques
