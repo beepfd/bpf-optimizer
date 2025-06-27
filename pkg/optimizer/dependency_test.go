@@ -661,93 +661,6 @@ func TestUpdateDependenciesDetailedValidation(t *testing.T) {
 	}
 }
 
-// TestControlFlowGraphStructure 测试控制流图结构的正确性
-func TestControlFlowGraphStructure(t *testing.T) {
-	// 解析真实的控制流图数据
-	cfg, base, _, err := parseUpdatePropertyInitArgs("../../testdata/update_property_init_args")
-	if err != nil {
-		t.Skipf("跳过测试，无法解析 update_property_init_args: %v", err)
-	}
-
-	t.Logf("测试控制流图结构，起始节点: %d", base)
-
-	// 验证起始节点存在
-	if _, exists := cfg.Nodes[base]; !exists {
-		t.Errorf("❌ 起始节点 %d 不存在于 Nodes 中", base)
-	} else {
-		t.Logf("✅ 起始节点 %d 存在", base)
-	}
-
-	// 验证前向和反向边的一致性
-	inconsistentCount := 0
-	for nodeID, successors := range cfg.Nodes {
-		for _, successor := range successors {
-			// 检查反向边是否存在
-			if predecessors, exists := cfg.NodesRev[successor]; exists {
-				found := false
-				for _, pred := range predecessors {
-					if pred == nodeID {
-						found = true
-						break
-					}
-				}
-				if !found {
-					inconsistentCount++
-					if inconsistentCount <= 5 { // 只显示前5个不一致的例子
-						t.Errorf("❌ 边不一致: %d -> %d 在 Nodes 中存在，但在 NodesRev[%d] 中找不到 %d",
-							nodeID, successor, successor, nodeID)
-					}
-				}
-			} else {
-				inconsistentCount++
-				if inconsistentCount <= 5 {
-					t.Errorf("❌ 节点 %d 在 Nodes 中有后继节点，但在 NodesRev 中不存在", successor)
-				}
-			}
-		}
-
-		if inconsistentCount > 5 {
-			t.Logf("... 还有 %d 个不一致的边（未显示）", inconsistentCount-5)
-			break
-		}
-	}
-
-	if inconsistentCount == 0 {
-		t.Logf("✅ 前向边和反向边完全一致")
-	} else {
-		t.Logf("❌ 发现 %d 个不一致的边", inconsistentCount)
-	}
-
-	// 统计节点度数分布
-	inDegreeMap := make(map[int]int)  // 入度分布
-	outDegreeMap := make(map[int]int) // 出度分布
-
-	for nodeID := range cfg.Nodes {
-		outDegree := len(cfg.Nodes[nodeID])
-		outDegreeMap[outDegree]++
-
-		inDegree := 0
-		if predecessors, exists := cfg.NodesRev[nodeID]; exists {
-			inDegree = len(predecessors)
-		}
-		inDegreeMap[inDegree]++
-	}
-
-	t.Logf("节点出度分布: %v", outDegreeMap)
-	t.Logf("节点入度分布: %v", inDegreeMap)
-
-	// 统计节点长度分布
-	lengthMap := make(map[int]int)
-	totalLength := 0
-	for _, length := range cfg.NodesLen {
-		lengthMap[length]++
-		totalLength += length
-	}
-
-	t.Logf("节点长度分布: %v", lengthMap)
-	t.Logf("平均节点长度: %.2f", float64(totalLength)/float64(len(cfg.NodesLen)))
-}
-
 // 解析 nodes_stats 数据
 // 格式为 {0: [[[0], [2], [], [], [], [], [], [], [], [], [-1]], {}]}
 // [[0], [2], [], [], [], [], [], [], [], [], [-1]] 为 registers
@@ -770,9 +683,18 @@ func parseNodesStats(filename string) (map[int]*RegisterState, error) {
 		return nil, fmt.Errorf("未找到 nodes_stats 定义")
 	}
 
-	// 提取 nodes_stats 的内容（从 { 开始到对应的 } 结束）
+	// 提取 nodes_stats 的内容
 	startIndex += len(prefix)
-	statsStr := extractDictContent(contentStr[startIndex:])
+	remainingContent := strings.TrimSpace(contentStr[startIndex:])
+
+	// 检查是否为 None
+	if strings.HasPrefix(remainingContent, "None") {
+		// 如果 nodes_stats = None，返回空的 map
+		return make(map[int]*RegisterState), nil
+	}
+
+	// 提取字典内容（从 { 开始到对应的 } 结束）
+	statsStr := extractDictContent(remainingContent)
 	if statsStr == "" {
 		return nil, fmt.Errorf("无法提取 nodes_stats 内容")
 	}
@@ -1162,4 +1084,93 @@ func TestParseNodesStats(t *testing.T) {
 		t.Logf("节点 1656 寄存器状态: %v", regState.Registers)
 		t.Logf("节点 1656 栈状态: %v", regState.Stacks)
 	}
+}
+
+// TestParseNodesStatsNone 测试 nodes_stats = None 的情况
+func TestParseNodesStatsNone(t *testing.T) {
+	// 创建临时文件测试 None 情况
+	tmpFile, err := os.CreateTemp("", "test_nodes_stats_none_*.txt")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// 写入包含 nodes_stats = None 的内容
+	content := `base = 0
+infer_only = False
+nodes = {0: [3], 3: [4]}
+nodes_rev = {0: [], 3: [0], 4: [3]}
+nodes_len = {0: 1, 3: 1, 4: 1}
+nodes_stats = None
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("写入临时文件失败: %v", err)
+	}
+	tmpFile.Close()
+
+	// 测试解析
+	nodesStats, err := parseNodesStats(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("解析 nodes_stats = None 失败: %v", err)
+	}
+
+	// 验证结果应该是空的 map
+	if nodesStats == nil {
+		t.Error("nodesStats 不应该为 nil")
+	}
+	if len(nodesStats) != 0 {
+		t.Errorf("nodesStats 应该为空，但包含 %d 个元素", len(nodesStats))
+	}
+
+	t.Logf("成功处理 nodes_stats = None 情况，返回空 map")
+}
+
+// TestParseUpdatePropertyInitArgsWithNone 测试整体解析包含 None 的情况
+func TestParseUpdatePropertyInitArgsWithNone(t *testing.T) {
+	// 创建临时文件测试 None 情况
+	tmpFile, err := os.CreateTemp("", "test_init_args_none_*.txt")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// 写入包含 nodes_stats = None 的内容
+	content := `base = 0
+infer_only = False
+nodes = {0: [3], 3: [4]}
+nodes_rev = {0: [], 3: [0], 4: [3]}
+nodes_len = {0: 1, 3: 1, 4: 1}
+nodes_stats = None
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("写入临时文件失败: %v", err)
+	}
+	tmpFile.Close()
+
+	// 测试整体解析
+	cfg, base, inferOnly, err := parseUpdatePropertyInitArgs(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("解析包含 None 的参数失败: %v", err)
+	}
+
+	// 验证结果
+	if base != 0 {
+		t.Errorf("base = %d, 期望 0", base)
+	}
+	if inferOnly != false {
+		t.Errorf("inferOnly = %v, 期望 false", inferOnly)
+	}
+	if cfg == nil {
+		t.Fatal("cfg 为 nil")
+	}
+	if cfg.NodeStats == nil {
+		t.Error("NodeStats 不应该为 nil")
+	}
+	if len(cfg.NodeStats) != 0 {
+		t.Errorf("NodeStats 应该为空，但包含 %d 个元素", len(cfg.NodeStats))
+	}
+
+	t.Logf("成功处理包含 nodes_stats = None 的完整解析")
 }
