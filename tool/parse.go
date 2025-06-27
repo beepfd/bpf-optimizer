@@ -2,6 +2,7 @@ package tool
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -309,4 +310,29 @@ func ParsePythonDictInt(filename string) ([]map[int]int, error) {
 	}
 
 	return result, scanner.Err()
+}
+
+func ParsePythonDictIntSliceToMapIntBool(line string) (map[int]bool, error) {
+	// 移除外层的大括号 {}
+	line = strings.Trim(line, "{}")
+	if line == "" {
+		return nil, errors.New("line is empty")
+	}
+
+	// 按逗号分割键值对
+	pairs := strings.Split(line, ",")
+	nodesDoneMap := make(map[int]bool)
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
+		key, err := strconv.Atoi(pair)
+		if err != nil {
+			return nil, err
+		}
+		nodesDoneMap[key] = true
+	}
+	return nodesDoneMap, nil
 }

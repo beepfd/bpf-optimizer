@@ -312,6 +312,46 @@ func TestSection_updateDependencies(t *testing.T) {
 		})
 	}
 }
+func parseUpdatePropertyCandidatesArgs(filename string) (*ControlFlowGraph, int, bool, map[int]bool, error) {
+	cfg, base, inferOnly, err := parseUpdatePropertyInitArgs(filename)
+	if err != nil {
+		return nil, 0, false, nil, err
+	}
+
+	nodesDone, err := parseUpdatePropertyNodesDoneArgs(filename)
+	if err != nil {
+		return nil, 0, false, nil, err
+	}
+
+	return cfg, base, inferOnly, nodesDone, nil
+}
+
+// {0, 2048, 2049, 2050, 2051, 3, 2054} 转 map[int]bool
+func parseUpdatePropertyNodesDoneArgs(filename string) (map[int]bool, error) {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	nodesDone := make(map[int]bool)
+
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "nodes_done = ") {
+			nodesDoneStr := strings.TrimPrefix(line, "nodes_done = ")
+			var err error
+			nodesDone, err = tool.ParsePythonDictIntSliceToMapIntBool(nodesDoneStr)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return nodesDone, nil
+}
 
 // parseUpdatePropertyInitArgs 解析 update_property_init_args 文件中的参数
 func parseUpdatePropertyInitArgs(filename string) (*ControlFlowGraph, int, bool, error) {

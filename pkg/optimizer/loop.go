@@ -157,14 +157,12 @@ func (s *Section) detectLoop(start, stop int, nodes map[int][]int, visited map[i
 	// Check if stop is a direct successor
 	for _, succ := range successors {
 		if succ == stop {
-			return []int{} // Found direct loop
+			return []int{} // Found direct loop, return the stop node
 		}
 	}
 
-	// Recursive search
-	path := []int{start}
 	found := false
-
+	path := []int{start}
 	for _, succ := range successors {
 		if visited[succ] {
 			continue // Avoid infinite recursion
@@ -172,9 +170,8 @@ func (s *Section) detectLoop(start, stop int, nodes map[int][]int, visited map[i
 
 		visited[succ] = true
 		subPath := s.detectLoop(succ, stop, nodes, visited)
-		delete(visited, succ) // Backtrack
-
-		if len(subPath) > 0 && subPath[0] != -1 {
+		if (len(subPath) > 0 && !contains(subPath, -1)) || len(subPath) == 0 {
+			// Found a path through this successor
 			path = append(path, subPath...)
 			found = true
 		}
@@ -184,7 +181,18 @@ func (s *Section) detectLoop(start, stop int, nodes map[int][]int, visited map[i
 		return []int{-1}
 	}
 
+	// No path found through any successor
 	return removeDuplicates(path)
+}
+
+// 需要检查整个切片是否包含-1
+func contains(slice []int, value int) bool {
+	for _, v := range slice {
+		if v == value {
+			return true
+		}
+	}
+	return false
 }
 
 // findLoopCandidates finds potential loop heads when normal processing is stuck
@@ -205,7 +213,7 @@ func (s *Section) findLoopCandidates(cfg *ControlFlowGraph, nodesDone map[int]bo
 	for candidate := range candidates {
 		visited := make(map[int]bool)
 		loopPath := s.detectLoop(candidate, candidate, cfg.Nodes, visited)
-		if len(loopPath) > 0 && loopPath[0] != -1 {
+		if len(loopPath) > 0 && !contains(loopPath, -1) {
 			return candidate
 		}
 	}

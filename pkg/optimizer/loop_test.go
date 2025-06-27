@@ -3,6 +3,8 @@ package optimizer
 import (
 	"reflect"
 	"testing"
+
+	"github.com/beepfd/bpf-optimizer/pkg/bpf"
 )
 
 func TestMergeRegisterStates(t *testing.T) {
@@ -182,4 +184,125 @@ func TestMergeRegisterStates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSection_findLoopCandidates(t *testing.T) {
+	cfg, _, _, nodeDone, err := parseUpdatePropertyCandidatesArgs("../../testdata/update_property_candidates_args")
+	if err != nil {
+		t.Fatalf("Failed to parse update_property_init_args: %v", err)
+	}
+
+	insns, _ := loadAnalysisFromFile("../../testdata/analyz_result.csv")
+	insns = insns[0:2257]
+	section := &Section{
+		Instructions: insns,
+		Dependencies: make([]DependencyInfo, 0),
+	}
+	for i := 0; i < len(insns); i++ {
+		section.Dependencies = append(section.Dependencies, DependencyInfo{
+			Dependencies: make([]int, 0),
+			DependedBy:   make([]int, 0),
+		})
+	}
+
+	type fields struct {
+		Name         string
+		Instructions []*bpf.Instruction
+		Dependencies []DependencyInfo
+	}
+	type args struct {
+		cfg       *ControlFlowGraph
+		nodesDone map[int]bool
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   int
+	}{
+		{
+			name: "test",
+			args: args{
+				cfg:       cfg,
+				nodesDone: nodeDone,
+			},
+			want: 2176,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Section{
+				Name:         tt.fields.Name,
+				Instructions: tt.fields.Instructions,
+				Dependencies: tt.fields.Dependencies,
+			}
+			if got := s.findLoopCandidates(tt.args.cfg, tt.args.nodesDone); got != tt.want {
+				t.Errorf("findLoopCandidates() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectLoopFixed(t *testing.T) {
+	// Parse the test data
+	cfg, _, _, _, err := parseUpdatePropertyCandidatesArgs("../../testdata/update_property_candidates_args")
+	if err != nil {
+		t.Fatalf("Failed to parse update_property_candidates_args: %v", err)
+	}
+
+	insns, _ := loadAnalysisFromFile("../../testdata/analyz_result.csv")
+	insns = insns[0:2257]
+	section := &Section{
+		Instructions: insns,
+		Dependencies: make([]DependencyInfo, 0),
+	}
+	for i := 0; i < len(insns); i++ {
+		section.Dependencies = append(section.Dependencies, DependencyInfo{
+			Dependencies: make([]int, 0),
+			DependedBy:   make([]int, 0),
+		})
+	}
+
+	// Test detectLoop with start=2176, stop=2176
+	start := 2176
+	stop := 2176
+
+	visited := make(map[int]bool)
+	result := section.detectLoop(start, stop, cfg.Nodes, visited)
+
+	// The function should find the loop path: 2176 -> 2180 -> 2181 -> 2185 -> 2188 -> 2155 -> 2156 -> 2176
+	// It should return the path without the final 2176: [2176 2180 2181 2185 2188 2155]
+	expectedPath := []int{2176, 2180, 2181, 2185, 2188, 2155}
+
+	if len(result) == 0 || contains(result, -1) {
+		t.Errorf("Expected to find a loop, but got: %v", result)
+		return
+	}
+
+	// Check that the result contains the expected nodes (order might differ due to removeDuplicates)
+	resultSet := make(map[int]bool)
+	for _, node := range result {
+		resultSet[node] = true
+	}
+
+	expectedSet := make(map[int]bool)
+	for _, node := range expectedPath {
+		expectedSet[node] = true
+	}
+
+	if len(resultSet) != len(expectedSet) {
+		t.Errorf("Expected path length %d, got %d. Expected: %v, Got: %v",
+			len(expectedSet), len(resultSet), expectedPath, result)
+		return
+	}
+
+	for node := range expectedSet {
+		if !resultSet[node] {
+			t.Errorf("Expected node %d in result, but not found. Expected: %v, Got: %v",
+				node, expectedPath, result)
+			return
+		}
+	}
+
+	t.Logf("Successfully detected loop: %v", result)
 }
