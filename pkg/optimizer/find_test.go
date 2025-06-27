@@ -8,7 +8,30 @@ import (
 )
 
 var (
-	step1NextNodes = map[int]bool{899: true, 578: true, 215: true, 784: true, 306: true, 36: true, 3: true, 839: true, 1608: true, 152: true, 1656: true, 1257: true, 282: true, 1218: true, 330: true}
+	forkNodeState = &RegisterState{
+		// new_regs = [[1674], [1672], [1671], [], [], [], [1667], [1656], [1658], [1668], []]
+		Registers: [][]int{
+			{1674},
+			{1672},
+			{1671},
+			{},
+			{},
+			{},
+			{1667},
+			{1656},
+			{1658},
+			{1668},
+			{},
+		},
+		// new_stack = {-56: [1657], -64: [1659], -48: [1660], -36: [1669]}
+		Stacks: map[int16][]int{
+			-56: {1657},
+			-64: {1659},
+			-48: {1660},
+			-36: {1669},
+		},
+		RegAlias: NewRegisterState().RegAlias,
+	}
 )
 
 func TestSection_findNextNode(t *testing.T) {
@@ -26,30 +49,13 @@ func TestSection_findNextNode(t *testing.T) {
 
 	cfg2 := cfg.Clone()
 	cfg2.NodeStats = map[int]*RegisterState{
-		1656: {
-			// regs = [[1674], [1672], [1671], [], [], [], [1667], [1656], [1658], [1668], []]
-			Registers: [][]int{
-				{1674},
-				{1672},
-				{1671},
-				{},
-				{},
-				{},
-				{1667},
-				{1656},
-				{1658},
-				{1668},
-				{},
-			},
-			// stack = {-56: [1657], -64: [1659], -48: [1660], -36: [1669]}
-			Stacks: map[int16][]int{
-				-56: {1657},
-				-64: {1659},
-				-48: {1660},
-				-36: {1669},
-			},
-			RegAlias: NewRegisterState().RegAlias,
-		},
+		1656: forkNodeState,
+	}
+
+	cfg3 := cfg.Clone()
+	cfg3.NodeStats = map[int]*RegisterState{
+		1656: forkNodeState,
+		1675: forkNodeState,
 	}
 
 	type fields struct {
@@ -97,31 +103,23 @@ func TestSection_findNextNode(t *testing.T) {
 				nodesDone: map[int]bool{0: true, 1656: true},
 				loopInfo:  nil,
 			},
-			want: 1675,
-			want1: &RegisterState{
-				// new_regs = [[1674], [1672], [1671], [], [], [], [1667], [1656], [1658], [1668], []]
-				Registers: [][]int{
-					{1674},
-					{1672},
-					{1671},
-					{},
-					{},
-					{},
-					{1667},
-					{1656},
-					{1658},
-					{1668},
-					{},
-				},
-				// new_stack = {-56: [1657], -64: [1659], -48: [1660], -36: [1669]}
-				Stacks: map[int16][]int{
-					-56: {1657},
-					-64: {1659},
-					-48: {1660},
-					-36: {1669},
-				},
-				RegAlias: NewRegisterState().RegAlias,
+			want:  1675,
+			want1: forkNodeState,
+		},
+		{
+			name: "step3",
+			fields: fields{
+				Name:         "test",
+				Instructions: insns,
+				Dependencies: section.Dependencies,
 			},
+			args: args{
+				cfg:       cfg3,
+				nodesDone: map[int]bool{0: true, 1656: true, 1675: true},
+				loopInfo:  nil,
+			},
+			want:  1676,
+			want1: forkNodeState,
 		},
 	}
 	for _, tt := range tests {
@@ -139,7 +137,6 @@ func TestSection_findNextNode(t *testing.T) {
 				t.Errorf("findNextNode() got1 = %v, want %v", got1, tt.want1)
 			}
 
-			t.Logf("got = %v, got1 = %v", got, got1)
 		})
 	}
 }
