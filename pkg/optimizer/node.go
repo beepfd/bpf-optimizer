@@ -62,11 +62,7 @@ func buildInstructionNodeReverse(cfg *ControlFlowGraph) {
 			}
 		}
 		for _, succ := range successors {
-			if _, exists := cfg.NodesRev[succ]; exists {
-				cfg.NodesRev[succ] = append(cfg.NodesRev[succ], key)
-			} else {
-				cfg.NodesRev[succ] = []int{key}
-			}
+			cfg.NodesRev[succ] = append(cfg.NodesRev[succ], key)
 		}
 	}
 }
