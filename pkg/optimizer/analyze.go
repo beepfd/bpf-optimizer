@@ -116,9 +116,10 @@ func (a *InstructionAnalysis) LDX(opcode uint8, dst int, src int, off int16, imm
 
 func (a *InstructionAnalysis) LD(opcode uint8, dst int, src int, off int16, imm int32) {
 	msb := opcode & 0xE0
-	if msb == bpf.BPF_IMM {
+	switch msb {
+	case bpf.BPF_IMM:
 		a.UpdatedReg = dst
-	} else if msb == bpf.BPF_ABS || msb == bpf.BPF_IND {
+	case bpf.BPF_ABS, bpf.BPF_IND:
 		a.UpdatedReg = dst
 		a.UsedReg = []int{src}
 	}
