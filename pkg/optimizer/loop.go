@@ -220,3 +220,19 @@ func (s *Section) findLoopCandidates(cfg *ControlFlowGraph, nodesDone map[int]bo
 
 	return 0 // No loop found
 }
+
+func buildLoopState(cfg *ControlFlowGraph, loopHead int) *RegisterState {
+	// Initialize loop state from predecessors
+	var predStates []*RegisterState
+	if preds, exists := cfg.NodesRev[loopHead]; exists {
+		for _, pred := range preds {
+			if predState, exists := cfg.NodeStats[pred]; exists {
+				predStates = append(predStates, predState)
+			}
+		}
+	}
+
+	loopState := MergeRegisterStates(predStates)
+
+	return loopState
+}

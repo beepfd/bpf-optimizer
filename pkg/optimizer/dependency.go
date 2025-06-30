@@ -307,6 +307,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 
 	newBase, newState := s.findNextNode(cfg, nodesDone, loopInfo)
 
+	// todo: ut 推进到这里，还需要验证此处循环信息
 	// If no ready node found, look for loops
 	if newBase == 0 {
 		loopHead := s.findLoopCandidates(cfg, nodesDone)
@@ -315,16 +316,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			newLoopInfo := NewLoopInfo(loopHead, loopInfo)
 
 			// Initialize loop state from predecessors
-			var predStates []*RegisterState
-			if preds, exists := cfg.NodesRev[loopHead]; exists {
-				for _, pred := range preds {
-					if predState, exists := cfg.NodeStats[pred]; exists {
-						predStates = append(predStates, predState)
-					}
-				}
-			}
-
-			loopState := MergeRegisterStates(predStates)
+			loopState := buildLoopState(cfg, loopHead)
 
 			// Process loop
 			return s.updateDependencies(cfg, loopHead, loopState, nodesDone, newLoopInfo, false)
