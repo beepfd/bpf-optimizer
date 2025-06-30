@@ -2,6 +2,7 @@ package optimizer
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,8 +22,39 @@ type DependencyInfo struct {
 	DependedBy   []int // indices of instructions that depend on this
 }
 
+func (d DependencyInfo) Deduplication() DependencyInfo {
+	// Remove duplicates from Dependencies
+	d.Dependencies = removeDuplicateInts(d.Dependencies)
+	// Remove duplicates from DependedBy
+	d.DependedBy = removeDuplicateInts(d.DependedBy)
+
+	return d
+}
+
+// removeDuplicateInts removes duplicate integers from a slice and returns a sorted slice
+func removeDuplicateInts(slice []int) []int {
+	if len(slice) == 0 {
+		return slice
+	}
+
+	// Sort first to group duplicates together
+	sort.Ints(slice)
+
+	// Remove duplicates by comparing adjacent elements
+	result := make([]int, 0, len(slice))
+	result = append(result, slice[0])
+
+	for i := 1; i < len(slice); i++ {
+		if slice[i] != slice[i-1] {
+			result = append(result, slice[i])
+		}
+	}
+
+	return result
+}
+
 // NewSection creates a new section from hex data
-func NewSection(hexData, name string) (*Section, error) {
+func NewSection(hexData, name string, skipOptimization bool) (*Section, error) {
 	if len(hexData)%16 != 0 {
 		return nil, fmt.Errorf("bytecode section length must be a multiple of 16")
 	}
@@ -61,6 +93,8 @@ func (s *Section) buildDependencies() {
 
 	// Initialize register state
 	initialState := NewRegisterState()
+	initialState.Registers[1] = []int{-1}
+	initialState.Registers[10] = []int{-1}
 
 	// Start dependency analysis from entry point
 	nodesDone := make(map[int]bool)
