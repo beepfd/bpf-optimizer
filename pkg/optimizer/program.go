@@ -67,7 +67,7 @@ func (prog *BPFProgram) processSections() error {
 
 			// Convert to hex string and create optimized section
 			hexData := hex.EncodeToString(data)
-			optimizedSection, err := NewSection(hexData, section.Name)
+			optimizedSection, err := NewSection(hexData, section.Name, false)
 			if err != nil {
 				fmt.Printf("Warning: failed to process section %s: %v\n", section.Name, err)
 				continue

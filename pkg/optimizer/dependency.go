@@ -1,6 +1,8 @@
 package optimizer
 
 import (
+	"fmt"
+
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
 )
 
@@ -78,8 +80,8 @@ func NewRegisterState() *RegisterState {
 	}
 
 	// r1 and r10 are initialized with -1 (entry state)
-	rs.Registers[1] = []int{-1}
-	rs.Registers[10] = []int{-1}
+	// rs.Registers[1] = []int{-1}
+	// rs.Registers[10] = []int{-1}
 
 	// Initialize alias tracking
 	for i := range rs.RegAlias {
@@ -198,6 +200,10 @@ func (s *Section) buildControlFlowGraph() *ControlFlowGraph {
 func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *RegisterState, nodesDone map[int]bool, loopInfo *LoopInfo, inferOnly bool) *RegisterState {
 	if nodesDone == nil {
 		nodesDone = make(map[int]bool)
+	}
+
+	if base == 49 {
+		fmt.Println("base", base)
 	}
 
 	nodeLen, exists := cfg.NodesLen[base]

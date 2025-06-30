@@ -1,6 +1,8 @@
 package optimizer
 
-import "github.com/beepfd/bpf-optimizer/pkg/bpf"
+import (
+	"github.com/beepfd/bpf-optimizer/pkg/bpf"
+)
 
 func (s *Section) BuildRegisterDependencies(cfg *ControlFlowGraph, nodeLen, base int, state *RegisterState, nodesDone map[int]bool) {
 	for i := 0; i < nodeLen; i++ {
