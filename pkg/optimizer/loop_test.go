@@ -306,3 +306,42 @@ func TestDetectLoopFixed(t *testing.T) {
 
 	t.Logf("Successfully detected loop: %v", result)
 }
+
+func Test_buildLoopState(t *testing.T) {
+	cfg, _, _, _, err := parseUpdatePropertyCandidatesArgs("../../testdata/update_property_candidates_args")
+	if err != nil {
+		t.Fatalf("Failed to parse update_property_candidates_args: %v", err)
+	}
+
+	type args struct {
+		cfg      *ControlFlowGraph
+		loopHead int
+	}
+	tests := []struct {
+		name string
+		args args
+		want *RegisterState
+	}{
+		{
+			name: "test",
+			args: args{
+				cfg:      cfg,
+				loopHead: 2176,
+			},
+			want: &RegisterState{
+				// new_regs = [[2133], [2130], [2131], [2135], [2134], [], [1667], [2128], [1658], [2046], []]
+				Registers: [][]int{{2133}, {2130}, {2131}, {2135}, {2134}, {}, {1667}, {2128}, {1658}, {2046}, {}},
+				// new_stack = {-56: [1657], -64: [1659], -48: [1660], -36: [1669], -72: [1999], -104: [2019], -32: [2020], -16: [2022], -96: [2023], -80: [2129], -112: [2044], -88: [2136]}
+				Stacks:   map[int16][]int{-56: {1657}, -64: {1659}, -48: {1660}, -36: {1669}, -72: {1999}, -104: {2019}, -32: {2020}, -16: {2022}, -96: {2023}, -80: {2129}, -112: {2044}, -88: {2136}},
+				RegAlias: []int16{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildLoopState(tt.args.cfg, tt.args.loopHead); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("buildLoopState() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
