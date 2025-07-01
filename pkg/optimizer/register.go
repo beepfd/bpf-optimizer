@@ -146,13 +146,10 @@ func (s *Section) ProcessUsedStack(instIdx int, analysis *InstructionAnalysis, i
 			}
 		} else if stackInsts, exists := state.Stacks[offset]; exists {
 			for _, stackInstIdx := range stackInsts {
-				if stackInstIdx == -1 {
-					// Special case for initial state, skip
-					continue
-				}
-				if stackInstIdx >= 0 && stackInstIdx < len(s.Dependencies) {
-					s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
-					s.Dependencies[stackInstIdx].DependedBy = append(s.Dependencies[stackInstIdx].DependedBy, instIdx)
+				s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
+				actualIndex := calculateActualIndex(stackInstIdx, len(s.Dependencies))
+				if actualIndex >= 0 && actualIndex < len(s.Dependencies) {
+					s.Dependencies[actualIndex].DependedBy = append(s.Dependencies[actualIndex].DependedBy, instIdx)
 				}
 			}
 		} else {

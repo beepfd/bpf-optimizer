@@ -11,9 +11,10 @@ import (
 
 // Section represents a BPF code section with optimization capabilities
 type Section struct {
-	Name         string
-	Instructions []*bpf.Instruction
-	Dependencies []DependencyInfo // dependency information for each instruction
+	Name             string
+	Instructions     []*bpf.Instruction
+	Dependencies     []DependencyInfo // dependency information for each instruction
+	ControlFlowGraph *ControlFlowGraph
 }
 
 // DependencyInfo tracks dependencies for an instruction
@@ -80,7 +81,9 @@ func NewSection(hexData, name string, skipOptimization bool) (*Section, error) {
 
 	// Build dependency graph and apply optimizations
 	section.buildDependencies()
-	section.applyOptimizations()
+	if !skipOptimization {
+		section.applyOptimizations()
+	}
 
 	return section, nil
 }
@@ -90,6 +93,7 @@ func NewSection(hexData, name string, skipOptimization bool) (*Section, error) {
 func (s *Section) buildDependencies() {
 	// Build control flow graph
 	cfg := s.buildControlFlowGraph()
+	s.ControlFlowGraph = cfg
 
 	// Initialize register state
 	initialState := NewRegisterState()

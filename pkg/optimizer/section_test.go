@@ -4,10 +4,21 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/beepfd/bpf-optimizer/tool"
 )
 
 func TestNewSection(t *testing.T) {
 	deps := buildFakeDependencies("../../testdata/dep_node_stat_index1_result")
+	cfgs, err := parseControlFlowGraphFromFiles(
+		"../../testdata/dep_nodes",
+		"../../testdata/dep_nodes_rev",
+		"../../testdata/dep_nodes_len",
+	)
+	if err != nil {
+		t.Fatalf("Failed to parse control flow graphs: %v", err)
+	}
+
 	type args struct {
 		hexDataFile string
 		name        string
@@ -43,6 +54,37 @@ func TestNewSection(t *testing.T) {
 				t.Errorf("NewSection() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+
+			gotCFG := got.ControlFlowGraph
+			wantCFG := cfgs[0]
+			if !tool.CompareIntSliceMap(gotCFG.Nodes, wantCFG.Nodes) {
+				errors := []string{"Nodes maps differ"}
+				errors = append(errors, tool.FormatMapDifference("Nodes", gotCFG.Nodes, wantCFG.Nodes))
+				if len(errors) > 0 {
+					t.Errorf("ControlFlowGraph comparison failed: %v", errors)
+				}
+			}
+
+			gotNodesLen := gotCFG.NodesLen
+			wantNodesLen := cfgs[0].NodesLen
+			if !tool.CompareIntIntMap(gotNodesLen, wantNodesLen) {
+				errors := []string{"NodesLen maps differ"}
+				errors = append(errors, tool.FormatIntMapDifference("NodesLen", gotNodesLen, wantNodesLen))
+				if len(errors) > 0 {
+					t.Errorf("ControlFlowGraph comparison failed: %v", errors)
+				}
+			}
+
+			gotNodesRev := gotCFG.NodesRev
+			wantNodesRev := cfgs[0].NodesRev
+			if !tool.CompareIntSliceMap(gotNodesRev, wantNodesRev) {
+				errors := []string{"NodesRev maps differ"}
+				errors = append(errors, tool.FormatMapDifference("NodesRev", gotNodesRev, wantNodesRev))
+				if len(errors) > 0 {
+					t.Errorf("ControlFlowGraph comparison failed: %v", errors)
+				}
+			}
+
 			if len(got.Dependencies) != len(tt.want.Dependencies) {
 				t.Errorf("NewSection() got = %v, want %v", got.Dependencies, tt.want.Dependencies)
 				return
@@ -52,14 +94,16 @@ func TestNewSection(t *testing.T) {
 					got.Dependencies[i].Deduplication().Dependencies,
 					tt.want.Dependencies[i].Deduplication().Dependencies,
 				) {
-					t.Errorf("NewSection() dependencies index %d got = %v, want %v", i, got.Dependencies[i], tt.want.Dependencies[i])
+					t.Errorf("NewSection() dependencies index %d got = %v, want %v",
+						i, got.Dependencies[i].Deduplication().Dependencies, tt.want.Dependencies[i].Deduplication().Dependencies)
 				}
 
 				if !reflect.DeepEqual(
 					got.Dependencies[i].Deduplication().DependedBy,
 					tt.want.Dependencies[i].Deduplication().DependedBy,
 				) {
-					t.Errorf("NewSection() dependedby index %d got = %v, want %v", i, got.Dependencies[i], tt.want.Dependencies[i])
+					t.Errorf("NewSection() dependedby index %d got = %v, want %v",
+						i, got.Dependencies[i].Deduplication().DependedBy, tt.want.Dependencies[i].Deduplication().DependedBy)
 				}
 
 			}
