@@ -1,8 +1,6 @@
 package optimizer
 
 import (
-	"fmt"
-
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
 )
 
@@ -202,10 +200,6 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		nodesDone = make(map[int]bool)
 	}
 
-	if base == 49 {
-		fmt.Println("base", base)
-	}
-
 	nodeLen, exists := cfg.NodesLen[base]
 	if !exists {
 		return state
@@ -301,7 +295,6 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		} else {
 			// Not all predecessors are done, mark this node as waiting (corresponds to Python's loop_info[3].add(base))
 			loopInfo.Waiting[base] = true
-			return state
 		}
 
 	}
@@ -316,7 +309,6 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		newState.RegAlias = state.RegAlias
 	}
 
-	// todo: ut 推进到这里，还需要验证此处循环信息
 	// If no ready node found, look for loops
 	if newBase == 0 {
 		loopHead := s.findLoopCandidates(cfg, nodesDone)
