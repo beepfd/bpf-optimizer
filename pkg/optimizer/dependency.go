@@ -312,6 +312,9 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 	}
 
 	newBase, newState := s.findNextNode(cfg, nodesDone, loopInfo)
+	if newState != nil && state != nil && state.RegAlias != nil {
+		newState.RegAlias = state.RegAlias
+	}
 
 	// todo: ut 推进到这里，还需要验证此处循环信息
 	// If no ready node found, look for loops
