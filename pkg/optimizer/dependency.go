@@ -1,6 +1,8 @@
 package optimizer
 
 import (
+	"reflect"
+
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
 )
 
@@ -252,45 +254,36 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			simulatedState := s.updateDependencies(cfg, loopInfo.Head, mergedState.Clone(), nodesDone, loopInfo, true)
 
 			// Check for fixed point (convergence) by comparing simulated result
-			continueLoop := false
-			if loopHeadState, exists := cfg.NodeStats[loopInfo.Head]; exists {
-				if !simulatedState.IsEqual(loopHeadState) {
-					continueLoop = true
-				}
-			} else {
-				continueLoop = true
+			continueLoop := s.checkLoopConvergence(cfg, loopInfo, simulatedState)
+			cfg.NodeStats[loopInfo.Head] = simulatedState
+
+			// Reset waiting nodes (corresponds to Python's nodes_done -= loop_info[3])
+			for node := range loopInfo.Waiting {
+				delete(nodesDone, node)
 			}
 
-			if continueLoop {
-				// Update loop head state
-				cfg.NodeStats[loopInfo.Head] = mergedState.Clone()
+			// Clear waiting set (corresponds to Python's loop_info[3] = set())
+			loopInfo.Waiting = make(map[int]bool)
 
-				// Reset processed nodes in this loop iteration (corresponds to Python's nodes_done -= loop_info[3])
-				for node := range loopInfo.Processed {
-					delete(nodesDone, node)
-				}
-				loopInfo.Processed = make(map[int]bool)
+			// Remove current base from done if it exists (corresponds to Python's if base in nodes_done: nodes_done.remove(base))
+			if _, exists := nodesDone[base]; exists {
+				delete(nodesDone, base)
+			}
 
-				// Reset waiting nodes in this loop iteration
-				for node := range loopInfo.Waiting {
-					delete(nodesDone, node)
-				}
-				loopInfo.Waiting = make(map[int]bool)
-
-				// Recursively process loop with updated state
-				return s.updateDependencies(cfg, loopInfo.Head, mergedState, nodesDone, loopInfo, false)
-			} else {
-				// Loop has converged, handle nested loop completion
+			if !continueLoop {
+				// Loop has converged
 				if loopInfo.Parent != nil {
 					// Notify parent loop that this loop head is complete (corresponds to Python's loop_info[4][3].add(loop_info[0]))
-					delete(loopInfo.Parent.Waiting, loopInfo.Head)
+					loopInfo.Parent.Waiting[loopInfo.Head] = true
 				}
 				nodesDone[loopInfo.Head] = true
+				// Switch to parent loop (corresponds to Python's loop_info = loop_info[4])
+				loopInfo = loopInfo.Parent
+			}
 
-				// Continue with parent loop if it exists
-				if loopInfo.Parent != nil {
-					return s.updateDependencies(cfg, base, state, nodesDone, loopInfo.Parent, inferOnly)
-				}
+			// Continue processing with loop info (corresponds to Python's recursive call)
+			if loopInfo != nil {
+				return s.updateDependencies(cfg, loopInfo.Head, simulatedState, nodesDone, loopInfo, false)
 			}
 		} else {
 			// Not all predecessors are done, mark this node as waiting (corresponds to Python's loop_info[3].add(base))
@@ -324,10 +317,69 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 		}
 	} else if newBase != base {
 		// Continue with next node
+		if loopInfo != nil {
+			loopInfo.Registers = newState.Registers
+			loopInfo.Stacks = newState.Stacks
+		}
 		return s.updateDependencies(cfg, newBase, newState, nodesDone, loopInfo, false)
 	}
 
 	return state
+}
+
+func (s *Section) checkLoopConvergence(cfg *ControlFlowGraph, loopInfo *LoopInfo, newState *RegisterState) bool {
+	// 获取当前循环头的状态
+	currentState, exists := cfg.NodeStats[loopInfo.Head]
+	if !exists {
+		// 如果没有当前状态，说明需要继续循环
+		return true
+	}
+
+	// 检查寄存器状态
+	for i := range currentState.Registers {
+		currentSet := make(map[int]bool)
+		newSet := make(map[int]bool)
+
+		// 转换为集合便于比较
+		for _, v := range currentState.Registers[i] {
+			currentSet[v] = true
+		}
+		for _, v := range newState.Registers[i] {
+			newSet[v] = true
+		}
+
+		// 比较集合
+		if !reflect.DeepEqual(currentSet, newSet) {
+			return true // 需要继续循环
+		}
+	}
+
+	// 检查栈状态
+	for offset, newStackVals := range newState.Stacks {
+		currentStackVals, exists := currentState.Stacks[offset]
+		if !exists {
+			return true // 需要继续循环
+		}
+
+		currentSet := make(map[int]bool)
+		newSet := make(map[int]bool)
+
+		// 转换为集合便于比较
+		for _, v := range currentStackVals {
+			currentSet[v] = true
+		}
+		for _, v := range newStackVals {
+			newSet[v] = true
+		}
+
+		// 比较集合
+		if !reflect.DeepEqual(currentSet, newSet) {
+			return true // 需要继续循环
+		}
+	}
+
+	// 所有状态都相等，循环已收敛
+	return false
 }
 
 // removeDuplicates removes duplicate integers from a slice
