@@ -4,7 +4,7 @@ import (
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
 )
 
-func (s *Section) BuildRegisterDependencies(cfg *ControlFlowGraph, nodeLen, base int, state *RegisterState, nodesDone map[int]bool) {
+func (s *Section) BuildRegisterDependencies(cfg *ControlFlowGraph, nodeLen, base int, state *RegisterState, nodesDone map[int]bool) (shouldReturn bool) {
 	for i := 0; i < nodeLen; i++ {
 		instIdx := base + i
 		if instIdx >= len(s.Instructions) {
@@ -60,11 +60,12 @@ func (s *Section) BuildRegisterDependencies(cfg *ControlFlowGraph, nodeLen, base
 		if analysis.IsExit {
 			nodesDone[base] = true
 			if len(nodesDone) >= len(cfg.NodesRev) {
-				return
+				shouldReturn = true
 			}
 		}
 	}
 
+	return
 }
 
 func (s *Section) ProcessUsedRegisters(instIdx int, analysis *InstructionAnalysis, inst *bpf.Instruction, state *RegisterState) {

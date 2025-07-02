@@ -61,7 +61,6 @@ func (s *Section) findNextNode(cfg *ControlFlowGraph, nodesDone map[int]bool, lo
 				}
 			}
 			newState = MergeRegisterStates(predStates)
-			// break
 		}
 	}
 
