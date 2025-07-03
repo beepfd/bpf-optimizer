@@ -8,7 +8,7 @@ import (
 	"github.com/beepfd/bpf-optimizer/tool"
 )
 
-func TestNewSection(t *testing.T) {
+func TestNewSectionWithoutOptimizer(t *testing.T) {
 	deps := buildFakeDependencies("../../testdata/dep_node_stat_index1_result")
 	cfgs, err := parseControlFlowGraphFromFiles(
 		"../../testdata/dep_nodes",
@@ -107,6 +107,57 @@ func TestNewSection(t *testing.T) {
 				}
 
 			}
+		})
+	}
+}
+
+func TestNewSection(t *testing.T) {
+	deps := buildFakeDependencies("../../testdata/dep_node_stat_index1_result")
+	// cfgs, err := parseControlFlowGraphFromFiles(
+	// 	"../../testdata/dep_nodes",
+	// 	"../../testdata/dep_nodes_rev",
+	// 	"../../testdata/dep_nodes_len",
+	// )
+	// if err != nil {
+	// 	t.Fatalf("Failed to parse control flow graphs: %v", err)
+	// }
+
+	type args struct {
+		hexDataFile string
+		name        string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    *Section
+		wantErr bool
+	}{
+		{
+			name: "test1",
+			args: args{
+				hexDataFile: "../../testdata/section_data",
+				name:        ".text",
+			},
+			want: &Section{
+				Name:         ".text",
+				Dependencies: deps,
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hexData, err := os.ReadFile(tt.args.hexDataFile)
+			if err != nil {
+				t.Errorf("NewSection() error = %v", err)
+				return
+			}
+			_, err = NewSection(string(hexData), tt.args.name, false)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewSection() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
 		})
 	}
 }
