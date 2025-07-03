@@ -1,7 +1,6 @@
 package optimizer
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
@@ -324,9 +323,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			loopInfo.Registers = newState.Registers
 			loopInfo.Stacks = newState.Stacks
 		}
-		if newState.Stacks[-48] != nil {
-			fmt.Printf("DEBUG base=%d, newState.Stacks[-48]=%v\n", newBase, newState.Stacks[-48])
-		}
+
 		return s.updateDependencies(cfg, newBase, newState, nodesDone, loopInfo, false)
 	}
 
