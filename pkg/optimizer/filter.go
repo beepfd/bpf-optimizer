@@ -67,9 +67,13 @@ func (s *Section) applyCompaction() {
 
 		// Look for LSH followed by RSH pattern (bit field extraction)
 		if inst1.Opcode == 0x67 && inst2.Opcode == 0x77 {
-			if inst1.Raw[8:] == "20000000" && inst2.Raw[8:] == "20000000" {
-				candidates = append(candidates, i)
+			if inst1.Raw[8:] != "20000000" || inst2.Raw[8:] != "20000000" {
+				continue
 			}
+			if inst1.DstReg != inst2.DstReg {
+				continue
+			}
+			candidates = append(candidates, i)
 		}
 	}
 
