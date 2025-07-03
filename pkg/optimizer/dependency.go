@@ -208,7 +208,9 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 	}
 
 	// Process instructions in current basic block
-	s.BuildRegisterDependencies(cfg, nodeLen, base, state, nodesDone)
+	if s.BuildRegisterDependencies(cfg, nodeLen, base, state, nodesDone) {
+		return state
+	}
 
 	// Store state for this node
 	cfg.NodeStats[base] = state.Clone()
@@ -321,6 +323,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			loopInfo.Registers = newState.Registers
 			loopInfo.Stacks = newState.Stacks
 		}
+
 		return s.updateDependencies(cfg, newBase, newState, nodesDone, loopInfo, false)
 	}
 
