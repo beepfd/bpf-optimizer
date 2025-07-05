@@ -98,13 +98,13 @@ func (s *Section) applyPeepholeOptimization() {
 		inst2 := s.Instructions[i+1]
 
 		if inst1.Opcode == 0x18 && inst2.Opcode == 0x00 && inst1.SrcReg == 0 {
-			// Check if this is a mask pattern (monotonically decreasing bits)
-			imm2Hex := inst2.Raw[14:16] + inst2.Raw[12:14] + inst2.Raw[10:12] + inst2.Raw[8:10]
-			if imm2Hex == "00000000" {
-				imm1Hex := inst1.Raw[14:16] + inst1.Raw[12:14] + inst1.Raw[10:12] + inst1.Raw[8:10]
-				if isMaskPattern(imm1Hex) {
-					maskCandidates = append(maskCandidates, i)
-				}
+			if inst2.Imm != 0 {
+				continue
+			}
+
+			imm1Hex := inst1.Raw[14:16] + inst1.Raw[12:14] + inst1.Raw[10:12] + inst1.Raw[8:10]
+			if isMaskPattern(imm1Hex) {
+				maskCandidates = append(maskCandidates, i)
 			}
 		}
 	}
