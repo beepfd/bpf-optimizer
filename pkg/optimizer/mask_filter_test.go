@@ -75,6 +75,16 @@ func TestFindMaskCandidates(t *testing.T) {
 			},
 			expected: []int{0, 3},
 		},
+		{
+			name: "multiple valid mask patterns",
+			instructions: []*bpf.Instruction{
+				createInstructionWithRaw("18010000feffffff", 0x18, 0),
+				createInstructionWithRaw("0000000000000000", 0x00, 0),
+				createInstructionWithRaw("18010000ffffffff", 0x18, 0),
+				createInstructionWithRaw("0000000000000000", 0x00, 0),
+			},
+			expected: []int{0, 2},
+		},
 	}
 
 	for _, tt := range tests {
