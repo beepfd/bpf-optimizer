@@ -110,3 +110,11 @@ func (inst *Instruction) String() string {
 	return fmt.Sprintf("Opcode: 0x%02x, Dst: r%d, Src: r%d, Off: %d, Imm: %d, Raw: %s",
 		inst.Opcode, inst.DstReg, inst.SrcReg, inst.Offset, inst.Imm, inst.Raw)
 }
+
+func (inst *Instruction) GetRawImm() string {
+	if len(inst.Raw) < 16 {
+		return ""
+	}
+
+	return inst.Raw[14:16] + inst.Raw[12:14] + inst.Raw[10:12] + inst.Raw[8:10]
+}
