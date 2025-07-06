@@ -115,25 +115,6 @@ func (s *Section) applyOptimizations() {
 
 // Helper functions
 
-// isMaskPattern checks if a hex string represents a mask pattern
-func isMaskPattern(hexStr string) bool {
-	val, err := strconv.ParseUint(hexStr, 16, 64)
-	if err != nil {
-		return false
-	}
-
-	binStr := fmt.Sprintf("%064b", val)
-
-	// Check for monotonically decreasing pattern
-	for i := 0; i < len(binStr)-1; i++ {
-		if binStr[i] < binStr[i+1] {
-			return false
-		}
-	}
-
-	return strings.Contains(binStr, "1")
-}
-
 // isMemoryOperation checks if an instruction is a memory operation
 func isMemoryOperation(inst *bpf.Instruction) bool {
 	class := inst.GetInstructionClass()

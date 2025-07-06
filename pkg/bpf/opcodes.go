@@ -101,3 +101,48 @@ const (
 
 // NOP instruction (jump 0) - used to replace removed instructions
 const NOP = "0500000000000000"
+
+// 0x18	lddw dst, imm	dst = imm
+// 0x20	ldabsw src, dst, imm	See kernel documentation
+// 0x28	ldabsh src, dst, imm	...
+// 0x30	ldabsb src, dst, imm	...
+// 0x38	ldabsdw src, dst, imm	...
+// 0x40	ldindw src, dst, imm	...
+// 0x48	ldindh src, dst, imm	...
+// 0x50	ldindb src, dst, imm	...
+// 0x58	ldinddw src, dst, imm	...
+// 0x61	ldxw dst, [src+off]	dst = *(uint32_t *) (src + off)
+// 0x69	ldxh dst, [src+off]	dst = *(uint16_t *) (src + off)
+// 0x71	ldxb dst, [src+off]	dst = *(uint8_t *) (src + off)
+// 0x79	ldxdw dst, [src+off]	dst = *(uint64_t *) (src + off)
+// 0x62	stw [dst+off], imm	*(uint32_t *) (dst + off) = imm
+// 0x6a	sth [dst+off], imm	*(uint16_t *) (dst + off) = imm
+// 0x72	stb [dst+off], imm	*(uint8_t *) (dst + off) = imm
+// 0x7a	stdw [dst+off], imm	*(uint64_t *) (dst + off) = imm
+// 0x63	stxw [dst+off], src	*(uint32_t *) (dst + off) = src
+// 0x6b	stxh [dst+off], src	*(uint16_t *) (dst + off) = src
+// 0x73	stxb [dst+off], src	*(uint8_t *) (dst + off) = src
+// 0x7b	stxdw [dst+off], src	*(uint64_t *) (dst + off) = src
+const (
+	BPF_LDDW    = 0x18
+	BPF_LDABSW  = 0x20
+	BPF_LDABSH  = 0x28
+	BPF_LDABSB  = 0x30
+	BPF_LDABSDB = 0x38
+	BPF_LDINDW  = 0x40
+	BPF_LDINDH  = 0x48
+	BPF_LDINDB  = 0x50
+	BPF_LDINDDW = 0x58
+	BPF_LDXW    = 0x61
+	BPF_LDXH    = 0x69
+	BPF_LDXB    = 0x71
+	BPF_LDXDW   = 0x79
+	BPF_STW     = 0x62
+	BPF_STH     = 0x6a
+	BPF_STB     = 0x72
+	BPF_STDW    = 0x7a
+	BPF_STXW    = 0x63
+	BPF_STXH    = 0x6b
+	BPF_STXB    = 0x73
+	BPF_STXDW   = 0x7b
+)

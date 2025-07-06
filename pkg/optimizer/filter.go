@@ -90,24 +90,8 @@ func (s *Section) applyCompaction() {
 
 // applyPeepholeOptimization implements peephole optimization
 func (s *Section) applyPeepholeOptimization() {
-	maskCandidates := make([]int, 0)
-
-	// Find mask candidates (64-bit immediate loads with mask patterns)
-	for i := 0; i < len(s.Instructions)-1; i++ {
-		inst1 := s.Instructions[i]
-		inst2 := s.Instructions[i+1]
-
-		if inst1.Opcode == 0x18 && inst2.Opcode == 0x00 && inst1.SrcReg == 0 {
-			if inst2.Imm != 0 {
-				continue
-			}
-
-			imm1Hex := inst1.Raw[14:16] + inst1.Raw[12:14] + inst1.Raw[10:12] + inst1.Raw[8:10]
-			if isMaskPattern(imm1Hex) {
-				maskCandidates = append(maskCandidates, i)
-			}
-		}
-	}
+	// Find mask candidates
+	maskCandidates := findMaskCandidates(s.Instructions)
 
 	// Find optimization candidates from mask candidates
 	candidates := make([][]int, 0)
