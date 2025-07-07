@@ -94,39 +94,10 @@ func (s *Section) applyPeepholeOptimization() {
 	maskCandidates := findMaskCandidates(s.Instructions)
 
 	// Find optimization candidates from mask candidates
-	candidates := make([][]int, 0)
-	for _, maskIdx := range maskCandidates {
-		for _, depIdx := range s.Dependencies[maskIdx].DependedBy {
-			depInst := s.Instructions[depIdx]
-
-			// Look for AND followed by right shift
-			if depInst.Opcode == 0x5F {
-				canOptimize := true
-				for _, nextDepIdx := range s.Dependencies[depIdx].DependedBy {
-					nextDepInst := s.Instructions[nextDepIdx]
-					if nextDepInst.Opcode != 0x77 {
-						canOptimize = false
-						break
-					}
-				}
-
-				if canOptimize {
-					candidates = append(candidates, []int{maskIdx, depIdx})
-				}
-			}
-		}
-	}
+	candidates := findCandidates(s, maskCandidates)
 
 	// Apply peephole optimization
-	for _, candidate := range candidates {
-		targetReg := s.Instructions[candidate[1]].Raw[3:4]
-		newHex := fmt.Sprintf("bc%s%s000000000000", targetReg, targetReg)
-		newInst, _ := bpf.NewInstruction(newHex)
-
-		s.Instructions[candidate[1]] = newInst
-		s.Instructions[candidate[0]].SetAsNOP()
-		s.Instructions[candidate[0]+1].SetAsNOP()
-	}
+	applyPeepholeOptimization(s, candidates)
 }
 
 // applySuperwordMerge implements superword-level merge optimization

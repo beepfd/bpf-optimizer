@@ -62,3 +62,88 @@ func isMaskPattern(hexStr string) bool {
 
 	return strings.Contains(binStr, "1")
 }
+
+func findCandidates(s *Section, maskCandidates []int) [][]int {
+	// Find optimization candidates from mask candidates
+	candidates := make([][]int, 0)
+	for _, maskIdx := range maskCandidates {
+		for _, depIdx := range s.Dependencies[maskIdx].DependedBy {
+			depInst := s.Instructions[depIdx]
+
+			// Look for AND followed by right shift
+			if depInst.Opcode == bpf.ALU_AND_K {
+				canOptimize := true
+				for _, nextDepIdx := range s.Dependencies[depIdx].DependedBy {
+					nextDepInst := s.Instructions[nextDepIdx]
+					if nextDepInst.Opcode != bpf.ALU_RSH_K {
+						canOptimize = false
+						break
+					}
+				}
+
+				if !canOptimize {
+					continue
+				}
+
+				// Check for previous MOV instruction that can be optimized
+				var includePre *int
+				if len(s.Dependencies[depIdx].Dependencies) == 2 {
+					// Find the other dependency (not the mask)
+					for _, preIdx := range s.Dependencies[depIdx].Dependencies {
+						if preIdx != maskIdx {
+							preInst := s.Instructions[preIdx]
+							if preInst.Opcode == bpf.ALU_MOV_K {
+								includePre = &preIdx
+							}
+							break
+						}
+					}
+				}
+
+				if includePre != nil {
+					candidates = append(candidates, []int{maskIdx, depIdx, *includePre})
+				} else {
+					candidates = append(candidates, []int{maskIdx, depIdx})
+				}
+			}
+		}
+	}
+
+	return candidates
+}
+
+func applyPeepholeOptimization(s *Section, candidates [][]int) {
+	// Apply peephole optimization
+	for _, candidate := range candidates {
+		var newHex string
+		var targetInst *bpf.Instruction
+
+		if len(candidate) == 3 {
+			// 3-element case: [mask, item, include_pre]
+			preInst := s.Instructions[candidate[2]]
+			newHex = fmt.Sprintf("bc%s%s000000000000", preInst.Raw[2:3], preInst.Raw[3:4])
+			targetInst = s.Instructions[candidate[1]]
+		} else {
+			// 2-element case: [mask, item]
+			targetInst = s.Instructions[candidate[1]]
+			targetReg := targetInst.Raw[3:4]
+			newHex = fmt.Sprintf("bc%s%s000000000000", targetReg, targetReg)
+		}
+
+		newInst, _ := bpf.NewInstruction(newHex)
+
+		// Apply optimizations based on candidate length
+		for i, idx := range candidate {
+			if i == 1 {
+				// Replace the target instruction (item) with the optimized one
+				s.Instructions[idx] = newInst
+			} else {
+				// Set other instructions as NOP
+				s.Instructions[idx].SetAsNOP()
+			}
+		}
+
+		// Always set mask+1 instruction as NOP (second part of 64-bit load)
+		s.Instructions[candidate[0]+1].SetAsNOP()
+	}
+}

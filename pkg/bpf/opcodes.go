@@ -40,6 +40,9 @@ const (
 	ALU_MOVSX = 0xb0 // offset decides the bits
 	ALU_ARSH  = 0xc0
 	ALU_END   = 0xd0
+	ALU_AND_K = 0x5f
+	ALU_RSH_K = 0x77
+	ALU_MOV_K = 0xbf
 )
 
 // BPF_BYTE operations
