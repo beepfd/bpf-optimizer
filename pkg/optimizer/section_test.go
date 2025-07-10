@@ -273,3 +273,35 @@ func TestDependencyInfoDeduplication(t *testing.T) {
 		})
 	}
 }
+
+func TestSection2(t *testing.T) {
+	mismatchCount := 0
+	totalTests := 100
+
+	for i := 0; i < totalTests; i++ {
+		hexData, err := os.ReadFile("../../testdata/section_data_2")
+		if err != nil {
+			t.Errorf("NewSection() error = %v", err)
+			return
+		}
+		got, err := NewSection(string(hexData), "uprobe", false)
+		if err != nil {
+			t.Errorf("NewSection() error = %v", err)
+			return
+		}
+
+		if got.Instructions[4810].Raw != "0500000000000000" {
+			mismatchCount++
+			t.Logf("Test %d: instruction mismatch, got: %s, expected: 0500000000000000",
+				i+1, got.Instructions[4810].Raw)
+		}
+	}
+
+	t.Logf("统计结果: %d/%d 次测试出现不匹配, 不匹配率: %.2f%%",
+		mismatchCount, totalTests, float64(mismatchCount)/float64(totalTests)*100)
+
+	if mismatchCount > 0 {
+		t.Errorf("发现 %d 次不匹配情况", mismatchCount)
+	}
+
+}
