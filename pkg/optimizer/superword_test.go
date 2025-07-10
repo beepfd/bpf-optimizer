@@ -303,7 +303,7 @@ func TestApplySuperwordMergeIntegration(t *testing.T) {
 	section := createTestSection(instructions)
 	merger := NewSuperwordMerger(section)
 
-	merger.ApplySuperwordMerge()
+	merger.ApplySuperwordMergeWithCandidates(nil)
 
 	// Check that instructions 0 and 1 were merged
 	if section.Instructions[0].IsNOP() {
@@ -339,7 +339,7 @@ func TestApplySuperwordMergeNoMerge(t *testing.T) {
 	originalInst1 := section.Instructions[1].Raw
 
 	merger := NewSuperwordMerger(section)
-	merger.ApplySuperwordMerge()
+	merger.ApplySuperwordMergeWithCandidates(nil)
 
 	// Check that instructions were not modified
 	if section.Instructions[0].Raw != originalInst0 {
