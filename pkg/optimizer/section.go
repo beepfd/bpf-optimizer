@@ -110,10 +110,8 @@ func (s *Section) applyOptimizations() {
 	s.applyConstantPropagation()
 	s.applyCompaction()
 	s.applyPeepholeOptimization()
-	s.applySuperwordMerge()
+	//s.applySuperwordMerge(storeCandidates)
 }
-
-// Helper functions
 
 // isMemoryOperation checks if an instruction is a memory operation
 func isMemoryOperation(inst *bpf.Instruction) bool {
