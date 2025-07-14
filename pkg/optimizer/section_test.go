@@ -112,19 +112,13 @@ func TestNewSectionWithoutOptimizer(t *testing.T) {
 }
 
 func TestNewSection(t *testing.T) {
-	deps := buildFakeDependencies("../../testdata/dep_node_stat_index1_result")
-	// cfgs, err := parseControlFlowGraphFromFiles(
-	// 	"../../testdata/dep_nodes",
-	// 	"../../testdata/dep_nodes_rev",
-	// 	"../../testdata/dep_nodes_len",
-	// )
-	// if err != nil {
-	// 	t.Fatalf("Failed to parse control flow graphs: %v", err)
-	// }
+	// deps := buildFakeDependencies("../../testdata/dep_node_stat_index1_result")
 
 	type args struct {
-		hexDataFile string
-		name        string
+		hexDataFile       string
+		name              string
+		optimizedDataFile string
+		depsFile          string
 	}
 	tests := []struct {
 		name    string
@@ -132,17 +126,23 @@ func TestNewSection(t *testing.T) {
 		want    *Section
 		wantErr bool
 	}{
+		// {
+		// 	name: ".text section",
+		// 	args: args{
+		// 		hexDataFile:       "../../testdata/section_data",
+		// 		optimizedDataFile: "../../testdata/section_data_optimized",
+		// 		name:              ".text",
+		// 		depsFile:          "../../testdata/section_data_text_deps",
+		// 	},
+		// },
 		{
-			name: "test1",
+			name: "uprobe_section",
 			args: args{
-				hexDataFile: "../../testdata/section_data",
-				name:        ".text",
+				hexDataFile:       "../../testdata/section_data_uprobe_raw",
+				optimizedDataFile: "../../testdata/section_data_uprobe_optimized",
+				depsFile:          "../../testdata/section_data_uprobe_deps",
+				name:              "uprobe",
 			},
-			want: &Section{
-				Name:         ".text",
-				Dependencies: deps,
-			},
-			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
@@ -152,10 +152,65 @@ func TestNewSection(t *testing.T) {
 				t.Errorf("NewSection() error = %v", err)
 				return
 			}
-			_, err = NewSection(string(hexData), tt.args.name, false)
+
+			optimizedData, err := os.ReadFile(tt.args.optimizedDataFile)
+			if err != nil {
+				t.Errorf("NewSection() error = %v", err)
+				return
+			}
+
+			optimizedDataInstRaws, err := tool.ParsePythonSliceInt(string(optimizedData))
+			if err != nil {
+				t.Errorf("ParsePythonSliceInt() error = %v", err)
+				return
+			}
+
+			got, err := NewSection(string(hexData), tt.args.name, false)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewSection() error = %v, wantErr %v", err, tt.wantErr)
 				return
+			}
+
+			deps := buildFakeDependencies(tt.args.depsFile)
+
+			// Debug: Print total length comparison
+			t.Logf("Total dependencies length - Expected: %d, Got: %d", len(deps), len(got.Dependencies))
+
+			// Debug: Focus on 4810 instruction and surrounding area
+			debugStart := 4800
+			debugEnd := 4820
+			if debugStart < len(deps) && debugEnd < len(deps) {
+				t.Logf("=== Debug dependency analysis for instructions %d-%d ===", debugStart, debugEnd)
+				for i := debugStart; i <= debugEnd && i < len(deps) && i < len(got.Dependencies); i++ {
+					expectedDeps := deps[i].Deduplication()
+					gotDeps := got.Dependencies[i].Deduplication()
+
+					if !equalIntSlice(gotDeps.Dependencies, expectedDeps.Dependencies) ||
+						!equalIntSlice(gotDeps.DependedBy, expectedDeps.DependedBy) {
+						t.Logf("MISMATCH at %d: Expected {%v %v}, Got {%v %v}",
+							i, expectedDeps.Dependencies, expectedDeps.DependedBy,
+							gotDeps.Dependencies, gotDeps.DependedBy)
+
+						// Show instruction details
+						if i < len(got.Instructions) {
+							t.Logf("  Instruction %d: Raw=%s, Opcode=0x%02x",
+								i, got.Instructions[i].Raw, got.Instructions[i].Opcode)
+						}
+					}
+				}
+			}
+
+			for i, instRaw := range optimizedDataInstRaws {
+				gotInst := got.Instructions[i]
+				if gotInst == nil {
+					t.Errorf("Test %s: instruction mismatch, ins index %d, got: <nil>, expected: %s",
+						tt.name, i, instRaw)
+					continue
+				}
+				if gotInst.Raw != instRaw {
+					t.Errorf("Test %s: instruction mismatch, ins index %d, got: %s, expected: %s",
+						tt.name, i, gotInst.Raw, instRaw)
+				}
 			}
 
 		})
@@ -279,7 +334,7 @@ func TestSection2(t *testing.T) {
 	totalTests := 100
 
 	for i := 0; i < totalTests; i++ {
-		hexData, err := os.ReadFile("../../testdata/section_data_2")
+		hexData, err := os.ReadFile("../../testdata/section_data_uprobe_raw")
 		if err != nil {
 			t.Errorf("NewSection() error = %v", err)
 			return

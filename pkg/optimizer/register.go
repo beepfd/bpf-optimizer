@@ -1,6 +1,9 @@
 package optimizer
 
 import (
+	"fmt"
+	"sort"
+
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
 )
 
@@ -110,11 +113,19 @@ func (s *Section) ProcessUsedRegisters(instIdx int, analysis *InstructionAnalysi
 				}
 			}
 
-			s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, depInstIdx)
-			// 修复：正确处理负数索引的动态位置计算
-			actualDepIndex := calculateActualIndex(depInstIdx, len(s.Dependencies))
-			if actualDepIndex >= 0 && actualDepIndex < len(s.Dependencies) {
-				s.Dependencies[actualDepIndex].DependedBy = append(s.Dependencies[actualDepIndex].DependedBy, instIdx)
+			// Check if dependency already exists to prevent duplicates
+			dependencyExists := s.FoundDependency(instIdx, depInstIdx)
+			if !dependencyExists {
+				s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, depInstIdx)
+				// 修复：正确处理负数索引的动态位置计算
+				actualDepIndex := calculateActualIndex(depInstIdx, len(s.Dependencies))
+				if actualDepIndex >= 0 && actualDepIndex < len(s.Dependencies) {
+					// Check if reverse dependency already exists
+					dependedByExists := s.FoundDependedBy(actualDepIndex, instIdx)
+					if !dependedByExists {
+						s.Dependencies[actualDepIndex].DependedBy = append(s.Dependencies[actualDepIndex].DependedBy, instIdx)
+					}
+				}
 			}
 		}
 	}
@@ -133,24 +144,58 @@ func (s *Section) ProcessUsedStack(instIdx int, analysis *InstructionAnalysis, i
 	if len(analysis.UsedStack) >= 2 {
 		offset := analysis.UsedStack[0]
 		if offset == 0 { // tail call
-			for _, stackInsts := range state.Stacks {
+			// Sort stack offsets to ensure deterministic order
+			var stackOffsets []int16
+			for stackOffset := range state.Stacks {
+				stackOffsets = append(stackOffsets, stackOffset)
+			}
+			sort.Slice(stackOffsets, func(i, j int) bool {
+				return stackOffsets[i] < stackOffsets[j]
+			})
+
+			// Debug: Log stack processing order
+			if instIdx >= 4810 && instIdx <= 4813 {
+				fmt.Printf("DEBUG: ProcessUsedStack - instIdx %d, stack offsets order: %v\n",
+					instIdx, stackOffsets)
+			}
+
+			for _, stackOffset := range stackOffsets {
+				stackInsts := state.Stacks[stackOffset]
 				for _, stackInstIdx := range stackInsts {
 					if stackInstIdx == -1 {
 						// Special case for initial state, skip
 						continue
 					}
 					if stackInstIdx >= 0 && stackInstIdx < len(s.Dependencies) {
-						s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
-						s.Dependencies[stackInstIdx].DependedBy = append(s.Dependencies[stackInstIdx].DependedBy, instIdx)
+						// Check if dependency already exists
+						dependencyExists := s.FoundDependency(instIdx, stackInstIdx)
+						if !dependencyExists {
+							s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
+						}
+
+						// Check if reverse dependency already exists
+						dependedByExists := s.FoundDependedBy(stackInstIdx, instIdx)
+						if !dependedByExists {
+							s.Dependencies[stackInstIdx].DependedBy = append(s.Dependencies[stackInstIdx].DependedBy, instIdx)
+						}
 					}
 				}
 			}
 		} else if stackInsts, exists := state.Stacks[offset]; exists {
 			for _, stackInstIdx := range stackInsts {
-				s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
+				// Check if dependency already exists
+				dependencyExists := s.FoundDependency(instIdx, stackInstIdx)
+				if !dependencyExists {
+					s.Dependencies[instIdx].Dependencies = append(s.Dependencies[instIdx].Dependencies, stackInstIdx)
+				}
+
 				actualIndex := calculateActualIndex(stackInstIdx, len(s.Dependencies))
 				if actualIndex >= 0 && actualIndex < len(s.Dependencies) {
-					s.Dependencies[actualIndex].DependedBy = append(s.Dependencies[actualIndex].DependedBy, instIdx)
+					// Check if reverse dependency already exists
+					dependedByExists := s.FoundDependedBy(actualIndex, instIdx)
+					if !dependedByExists {
+						s.Dependencies[actualIndex].DependedBy = append(s.Dependencies[actualIndex].DependedBy, instIdx)
+					}
 				}
 			}
 		} else {
