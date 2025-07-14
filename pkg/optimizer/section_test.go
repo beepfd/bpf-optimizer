@@ -126,15 +126,15 @@ func TestNewSection(t *testing.T) {
 		want    *Section
 		wantErr bool
 	}{
-		// {
-		// 	name: ".text section",
-		// 	args: args{
-		// 		hexDataFile:       "../../testdata/section_data",
-		// 		optimizedDataFile: "../../testdata/section_data_optimized",
-		// 		name:              ".text",
-		// 		depsFile:          "../../testdata/section_data_text_deps",
-		// 	},
-		// },
+		{
+			name: ".text section",
+			args: args{
+				hexDataFile:       "../../testdata/section_data",
+				optimizedDataFile: "../../testdata/section_data_optimized",
+				name:              ".text",
+				depsFile:          "../../testdata/section_data_text_deps",
+			},
+		},
 		{
 			name: "uprobe_section",
 			args: args{
