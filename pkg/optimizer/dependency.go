@@ -268,9 +268,7 @@ func (s *Section) updateDependencies(cfg *ControlFlowGraph, base int, state *Reg
 			loopInfo.Waiting = make(map[int]bool)
 
 			// Remove current base from done if it exists (corresponds to Python's if base in nodes_done: nodes_done.remove(base))
-			if _, exists := nodesDone[base]; exists {
-				delete(nodesDone, base)
-			}
+			delete(nodesDone, base)
 
 			if !continueLoop {
 				// Loop has converged

@@ -103,17 +103,59 @@ func (s *Section) buildDependencies() {
 	// Start dependency analysis from entry point
 	nodesDone := make(map[int]bool)
 	s.updateDependencies(cfg, 0, initialState, nodesDone, nil, false)
+
+	// Debug: Log when algorithm produces correct results for 4810
+	if s.Name == "uprobe" && len(s.Instructions) > 4810 {
+		deps4810 := s.Dependencies[4810].Deduplication()
+		deps4811 := s.Dependencies[4811].Deduplication()
+		deps4812 := s.Dependencies[4812].Deduplication()
+		deps4813 := s.Dependencies[4813].Deduplication()
+
+		isCorrect := len(deps4810.Dependencies) == 0 && len(deps4810.DependedBy) == 0
+		fmt.Printf("DEBUG: Dependency analysis results:\n")
+		fmt.Printf("  4810 - Correct: %v, Deps: %v, DependedBy: %v\n",
+			isCorrect, deps4810.Dependencies, deps4810.DependedBy)
+		fmt.Printf("  4811 - Deps: %v, DependedBy: %v\n",
+			deps4811.Dependencies, deps4811.DependedBy)
+		fmt.Printf("  4812 - Deps: %v, DependedBy: %v\n",
+			deps4812.Dependencies, deps4812.DependedBy)
+		fmt.Printf("  4813 - Deps: %v, DependedBy: %v\n",
+			deps4813.Dependencies, deps4813.DependedBy)
+	}
 }
 
 // applyOptimizations applies all optimization techniques
 func (s *Section) applyOptimizations() {
+	if s.Name == "uprobe" && len(s.Instructions) > 4810 {
+		fmt.Printf("DEBUG: Before optimization - 4810: %s, 4811: %s, 4812: %s, 4813: %s\n",
+			s.Instructions[4810].Raw, s.Instructions[4811].Raw,
+			s.Instructions[4812].Raw, s.Instructions[4813].Raw)
+	}
+
 	s.applyConstantPropagation()
 	s.applyCompaction()
 	s.applyPeepholeOptimization()
-	s.applySuperwordMerge()
-}
+	//s.applySuperwordMerge(storeCandidates)
 
-// Helper functions
+	if s.Name == "uprobe" && len(s.Instructions) > 4810 {
+		fmt.Printf("DEBUG: After optimization - 4810: %s, 4811: %s, 4812: %s, 4813: %s\n",
+			s.Instructions[4810].Raw, s.Instructions[4811].Raw,
+			s.Instructions[4812].Raw, s.Instructions[4813].Raw)
+
+		// Check if optimization was successful
+		expected4810 := "0500000000000000" // NOP
+		expected4811 := "7202090001000000" // ST immediate
+		expected4812 := "7203a85e01000000" // ST immediate
+		expected4813 := "7203c85e01000000" // ST immediate
+
+		optimizationSuccess := s.Instructions[4810].Raw == expected4810 &&
+			s.Instructions[4811].Raw == expected4811 &&
+			s.Instructions[4812].Raw == expected4812 &&
+			s.Instructions[4813].Raw == expected4813
+
+		fmt.Printf("DEBUG: Optimization success: %v\n", optimizationSuccess)
+	}
+}
 
 // isMemoryOperation checks if an instruction is a memory operation
 func isMemoryOperation(inst *bpf.Instruction) bool {
@@ -170,4 +212,28 @@ func (s *Section) Dump() []byte {
 	}
 
 	return data
+}
+
+func (s *Section) FoundDependency(instIdx int, depInstIdx int) bool {
+	dependencyExists := false
+	for _, existingDep := range s.Dependencies[instIdx].Dependencies {
+		if existingDep == depInstIdx {
+			dependencyExists = true
+			break
+		}
+	}
+
+	return dependencyExists
+}
+
+func (s *Section) FoundDependedBy(instIdx int, depInstIdx int) bool {
+	dependencyExists := false
+	for _, existingDep := range s.Dependencies[instIdx].DependedBy {
+		if existingDep == depInstIdx {
+			dependencyExists = true
+			break
+		}
+	}
+
+	return dependencyExists
 }

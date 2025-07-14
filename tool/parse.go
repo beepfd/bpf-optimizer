@@ -336,3 +336,21 @@ func ParsePythonDictIntSliceToMapIntBool(line string) (map[int]bool, error) {
 	}
 	return nodesDoneMap, nil
 }
+
+func ParsePythonSliceInt(line string) (values []string, err error) {
+	line = strings.Trim(line, "[]")
+	if line == "" {
+		return nil, errors.New("line is empty")
+	}
+
+	pairs := strings.Split(line, ",")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+
+		values = append(values, strings.Split(pair, "'")[1])
+	}
+	return values, nil
+}

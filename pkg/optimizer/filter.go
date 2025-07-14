@@ -7,8 +7,9 @@ import (
 )
 
 // applyConstantPropagation implements constant propagation optimization
-func (s *Section) applyConstantPropagation() {
+func (s *Section) applyConstantPropagation() []int {
 	candidates := make([]int, 0)
+	storeCandidates := make([]int, 0)
 
 	for i, inst := range s.Instructions {
 		// Look for immediate load instructions (MOV with immediate)
@@ -28,6 +29,7 @@ func (s *Section) applyConstantPropagation() {
 
 			if canPropagate {
 				candidates = append(candidates, i)
+				storeCandidates = append(storeCandidates, s.Dependencies[i].DependedBy...)
 			}
 		}
 	}
@@ -55,6 +57,8 @@ func (s *Section) applyConstantPropagation() {
 		s.Instructions[candIdx].SetAsNOP()
 		s.Dependencies[candIdx].DependedBy = make([]int, 0)
 	}
+
+	return storeCandidates
 }
 
 // applyCompaction implements code compaction optimization
@@ -101,24 +105,7 @@ func (s *Section) applyPeepholeOptimization() {
 }
 
 // applySuperwordMerge implements superword-level merge optimization
-func (s *Section) applySuperwordMerge() {
-	// Simplified implementation - full version would need complex analysis
-	// This is a placeholder for the sophisticated superword analysis
-	// that was in the Python version
-
-	// Look for adjacent memory operations that can be merged
-	for i := 0; i < len(s.Instructions)-1; i++ {
-		inst1 := s.Instructions[i]
-		inst2 := s.Instructions[i+1]
-
-		// Check if both are memory operations with consecutive addresses
-		if isMemoryOperation(inst1) && isMemoryOperation(inst2) {
-			if canMergeMemoryOps(inst1, inst2) {
-				// Merge the operations (simplified)
-				mergedInst := createMergedMemoryOp(inst1, inst2)
-				s.Instructions[i] = mergedInst
-				s.Instructions[i+1].SetAsNOP()
-			}
-		}
-	}
+func (s *Section) applySuperwordMerge(storeCandidates []int) {
+	merger := NewSuperwordMerger(s)
+	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
 }

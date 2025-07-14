@@ -1,6 +1,7 @@
 package optimizer
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/beepfd/bpf-optimizer/pkg/bpf"
@@ -96,7 +97,24 @@ func buildInstructionNodeLength(insts []*bpf.Instruction, cfg *ControlFlowGraph)
 // rebuildInstructionNodeRev 重建反向映射
 func rebuildInstructionNodeRev(insts []*bpf.Instruction, cfg *ControlFlowGraph) {
 	// Analyze each instruction in each basic block
-	for node, nodeLen := range cfg.NodesLen {
+	// Sort nodes to ensure deterministic order
+	var sortedNodes []int
+	for node := range cfg.NodesLen {
+		sortedNodes = append(sortedNodes, node)
+	}
+	sort.Ints(sortedNodes)
+	
+	// Debug: Log node processing order for 4810 area
+	fmt.Printf("DEBUG: rebuildInstructionNodeRev - Node processing order around 4810: ")
+	for _, node := range sortedNodes {
+		if node >= 4800 && node <= 4820 {
+			fmt.Printf("%d ", node)
+		}
+	}
+	fmt.Printf("\n")
+	
+	for _, node := range sortedNodes {
+		nodeLen := cfg.NodesLen[node]
 		for i := 0; i < nodeLen; i++ {
 			instIdx := node + i
 			if instIdx >= len(insts) {
