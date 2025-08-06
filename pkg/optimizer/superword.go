@@ -231,11 +231,8 @@ func (sm *SuperwordMerger) hasInterveningJumpOrLoad(start, end int) bool {
 	for i := start + 1; i < end; i++ {
 		inst := sm.section.Instructions[i]
 
-		// Skip NOP instructions
-		if inst.IsNOP() {
-			continue
-		}
-
+		// Don't skip any instructions when checking for jumps/loads
+		// Even "NOP" instructions like "0500000000000000" are actually jump instructions
 		opcode := inst.Opcode
 		class := opcode & 0x07
 
@@ -329,10 +326,9 @@ func (sm *SuperwordMerger) applySuperwordMergeWithCandidates(storeCandidates []i
 		flag = false
 		for j := currentIdx + 1; j < nextIdx; j++ {
 			inst := sm.section.Instructions[j]
-			if inst.IsNOP() {
-				continue
-			}
 
+			// Don't skip any instructions when checking for jumps/loads
+			// Even "NOP" instructions like "0500000000000000" are actually jump instructions
 			opcode := inst.Opcode
 			class := opcode & 0x07
 

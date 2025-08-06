@@ -383,3 +383,262 @@ func TestProcessGroup(t *testing.T) {
 		}
 	}
 }
+
+// TestOffsetParsing tests if BPF instruction offset parsing works correctly
+func TestOffsetParsing(t *testing.T) {
+	// Debug test to verify offset parsing from Issue #21
+	testCases := []struct {
+		hex            string
+		expectedOffset int16
+		description    string
+	}{
+		{"7206f70f28000000", 0x0ff7, "Issue #21 instruction 0: *(u8 *)(r6 + 0xff7) = 0x28"},
+		{"7206f60f20000000", 0x0ff6, "Issue #21 instruction 2: *(u8 *)(r6 + 0xff6) = 0x20"},
+		{"7200000028000000", 0x0000, "Simple case: *(u8 *)(r0 + 0) = 0x28"},
+		{"7200010020000000", 0x0001, "Simple case: *(u8 *)(r0 + 1) = 0x20"},
+	}
+
+	for _, tc := range testCases {
+		inst := createTestInstruction(tc.hex)
+		t.Logf("%s", tc.description)
+		t.Logf("  Raw: %s", inst.Raw)
+		t.Logf("  Parsed offset: 0x%04x (expected: 0x%04x)", inst.Offset, tc.expectedOffset)
+		t.Logf("  Offset match: %t", inst.Offset == tc.expectedOffset)
+
+		if inst.Offset != tc.expectedOffset {
+			t.Errorf("Offset parsing error: expected 0x%04x, got 0x%04x", tc.expectedOffset, inst.Offset)
+		}
+	}
+}
+
+// TestJumpInstructionDetection tests if jump instruction detection works correctly
+func TestJumpInstructionDetection(t *testing.T) {
+	// Debug test to verify jump instruction detection logic
+	jumpInst := createTestInstruction("0500000000000000") // goto +0x0
+
+	t.Logf("Jump instruction analysis:")
+	t.Logf("  Raw: %s", jumpInst.Raw)
+	t.Logf("  Opcode: 0x%02x", jumpInst.Opcode)
+	t.Logf("  Class: 0x%02x", jumpInst.Opcode&0x07)
+	t.Logf("  IsNOP: %t", jumpInst.IsNOP())
+
+	class := jumpInst.Opcode & 0x07
+	isJump := class == bpf.BPF_LDX || class == bpf.BPF_JMP || class == 0x06
+
+	t.Logf("  BPF_JMP constant: 0x%02x", bpf.BPF_JMP)
+	t.Logf("  BPF_LDX constant: 0x%02x", bpf.BPF_LDX)
+	t.Logf("  Should be detected as jump/load: %t", isJump)
+
+	if !isJump {
+		t.Error("Jump instruction should be detected as jump/load instruction")
+	}
+}
+
+// TestSuperwordMergeBugReproduction reproduces the bug described in GitHub Issue #21
+// https://github.com/beepfd/bpf-optimizer/issues/21
+func TestSuperwordMergeBugReproduction(t *testing.T) {
+	// Original instructions from the issue:
+	// 513:	72 06 f7 0f 28 00 00 00	*(u8 *)(r6 + 0xff7) = 0x28
+	// 514:	05 00 00 00 00 00 00 00	goto +0x0 <LBB1_95+0x1e8>
+	// 515:	72 06 f6 0f 20 00 00 00	*(u8 *)(r6 + 0xff6) = 0x20
+
+	instructions := []string{
+		"7206f70f28000000", // *(u8 *)(r6 + 0xff7) = 0x28 (index 0)
+		"0500000000000000", // goto +0x0 (jump instruction, index 1)
+		"7206f60f20000000", // *(u8 *)(r6 + 0xff6) = 0x20 (index 2)
+	}
+
+	section := createTestSection(instructions)
+	originalInst0 := section.Instructions[0].Raw
+	originalInst1 := section.Instructions[1].Raw
+	originalInst2 := section.Instructions[2].Raw
+
+	merger := NewSuperwordMerger(section)
+
+	// Apply superword merge with store candidates (indices 0 and 2)
+	storeCandidates := []int{0, 2}
+	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+
+	t.Logf("Before optimization:")
+	t.Logf("  Instruction 0: %s", originalInst0)
+	t.Logf("  Instruction 1: %s", originalInst1)
+	t.Logf("  Instruction 2: %s", originalInst2)
+
+	t.Logf("After optimization:")
+	t.Logf("  Instruction 0: %s (IsNOP: %t)", section.Instructions[0].Raw, section.Instructions[0].IsNOP())
+	t.Logf("  Instruction 1: %s (IsNOP: %t)", section.Instructions[1].Raw, section.Instructions[1].IsNOP())
+	t.Logf("  Instruction 2: %s (IsNOP: %t)", section.Instructions[2].Raw, section.Instructions[2].IsNOP())
+
+	// Assertions to detect the bug:
+
+	// 1. The jump instruction should NOT be modified
+	if section.Instructions[1].Raw != originalInst1 {
+		t.Errorf("Bug detected: Jump instruction was incorrectly modified")
+		t.Errorf("  Expected: %s", originalInst1)
+		t.Errorf("  Got: %s", section.Instructions[1].Raw)
+	}
+
+	// 2. Store instructions should NOT be merged because they have a jump instruction between them
+	// This is the core bug - the algorithm should detect the intervening jump and avoid merging
+	if section.Instructions[0].IsNOP() || section.Instructions[2].IsNOP() {
+		t.Errorf("Bug detected: Store instructions were incorrectly merged despite intervening jump")
+		t.Errorf("  Instruction 0 IsNOP: %t (should be false)", section.Instructions[0].IsNOP())
+		t.Errorf("  Instruction 2 IsNOP: %t (should be false)", section.Instructions[2].IsNOP())
+	}
+
+	// 3. The offsets are not consecutive (0xff7 and 0xff6) so they should not be merged anyway
+	// ff7 = 4087, ff6 = 4086 (little endian), so offset difference should be -1, not +1
+	if section.Instructions[0].Raw != originalInst0 {
+		t.Errorf("Bug detected: First store instruction was incorrectly modified")
+		t.Errorf("  Expected: %s", originalInst0)
+		t.Errorf("  Got: %s", section.Instructions[0].Raw)
+	}
+
+	if section.Instructions[2].Raw != originalInst2 {
+		t.Errorf("Bug detected: Second store instruction was incorrectly modified")
+		t.Errorf("  Expected: %s", originalInst2)
+		t.Errorf("  Got: %s", section.Instructions[2].Raw)
+	}
+}
+
+// TestSuperwordMergeWithInterveningJump tests that merge is correctly blocked by intervening jump
+func TestSuperwordMergeWithInterveningJump(t *testing.T) {
+	// Test that superword merge respects intervening jump instructions
+	instructions := []string{
+		"7200000028000000", // *(u8 *)(r0 + 0) = 0x28 (index 0)
+		"0500000000000000", // goto +0x0 (jump instruction, index 1)
+		"7200010020000000", // *(u8 *)(r0 + 1) = 0x20 (index 2)
+	}
+
+	section := createTestSection(instructions)
+	originalInst0 := section.Instructions[0].Raw
+	originalInst1 := section.Instructions[1].Raw
+	originalInst2 := section.Instructions[2].Raw
+
+	merger := NewSuperwordMerger(section)
+
+	// Apply superword merge with store candidates
+	storeCandidates := []int{0, 2}
+	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+
+	t.Logf("After optimization:")
+	t.Logf("  Instruction 0: %s (IsNOP: %t, expected: %s)", section.Instructions[0].Raw, section.Instructions[0].IsNOP(), originalInst0)
+	t.Logf("  Instruction 1: %s (IsNOP: %t, expected: %s)", section.Instructions[1].Raw, section.Instructions[1].IsNOP(), originalInst1)
+	t.Logf("  Instruction 2: %s (IsNOP: %t, expected: %s)", section.Instructions[2].Raw, section.Instructions[2].IsNOP(), originalInst2)
+
+	// Instructions should remain unchanged due to intervening jump
+	if section.Instructions[0].Raw != originalInst0 {
+		t.Error("First store instruction should not be modified due to intervening jump")
+	}
+
+	if section.Instructions[1].Raw != originalInst1 {
+		t.Error("Jump instruction should not be modified")
+	}
+
+	if section.Instructions[2].Raw != originalInst2 {
+		t.Error("Second store instruction should not be modified due to intervening jump")
+	}
+
+	// Store instructions (0 and 2) should not be converted to NOP when merge is blocked by jump
+	// Jump instruction (1) can naturally be IsNOP() = true as it's "0500000000000000"
+	if section.Instructions[0].IsNOP() {
+		t.Errorf("Instruction 0 (store) should not be NOP when merge is blocked by jump")
+	}
+	if section.Instructions[2].IsNOP() {
+		t.Errorf("Instruction 2 (store) should not be NOP when merge is blocked by jump")
+	}
+}
+
+// TestSuperwordMergeNonConsecutiveOffsets tests merge behavior with non-consecutive offsets
+func TestSuperwordMergeNonConsecutiveOffsets(t *testing.T) {
+	// Test instructions with non-consecutive offsets that should not be merged
+	instructions := []string{
+		"7200000028000000", // *(u8 *)(r0 + 0) = 0x28 (index 0)
+		"7200020020000000", // *(u8 *)(r0 + 2) = 0x20 (index 1) - gap at offset 1
+	}
+
+	section := createTestSection(instructions)
+	originalInst0 := section.Instructions[0].Raw
+	originalInst1 := section.Instructions[1].Raw
+
+	merger := NewSuperwordMerger(section)
+
+	// Apply superword merge with store candidates
+	storeCandidates := []int{0, 1}
+	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+
+	// Instructions should remain unchanged due to non-consecutive offsets
+	if section.Instructions[0].Raw != originalInst0 {
+		t.Error("First store instruction should not be modified due to non-consecutive offsets")
+	}
+
+	if section.Instructions[1].Raw != originalInst1 {
+		t.Error("Second store instruction should not be modified due to non-consecutive offsets")
+	}
+
+	// No instructions should be converted to NOP
+	for i, inst := range section.Instructions {
+		if inst.IsNOP() {
+			t.Errorf("Instruction %d should not be NOP when merge is not possible", i)
+		}
+	}
+}
+
+// TestSuperwordMergeIssue21SpecificOffsets tests the specific offset case from Issue #21
+func TestSuperwordMergeIssue21SpecificOffsets(t *testing.T) {
+	// Test the exact scenario from Issue #21: 0xff7, jump, 0xff6
+	// These instructions should NOT be merged due to intervening jump AND wrong execution order
+	instructions := []string{
+		"7206f70f28000000", // *(u8 *)(r6 + 0xff7) = 0x28
+		"0500000000000000", // goto +0x0 (jump instruction)
+		"7206f60f20000000", // *(u8 *)(r6 + 0xff6) = 0x20 - comes AFTER the first one!
+	}
+
+	section := createTestSection(instructions)
+	originalInst0 := section.Instructions[0].Raw
+	originalInst1 := section.Instructions[1].Raw
+	originalInst2 := section.Instructions[2].Raw
+
+	t.Logf("BEFORE optimization:")
+	t.Logf("  Instruction 0: %s, offset: 0x%04x", section.Instructions[0].Raw, section.Instructions[0].Offset)
+	t.Logf("  Instruction 1: %s, offset: 0x%04x", section.Instructions[1].Raw, section.Instructions[1].Offset)
+	t.Logf("  Instruction 2: %s, offset: 0x%04x", section.Instructions[2].Raw, section.Instructions[2].Offset)
+
+	merger := NewSuperwordMerger(section)
+
+	// Apply superword merge with store candidates (indices 0 and 2, skipping jump at 1)
+	storeCandidates := []int{0, 2}
+	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+
+	t.Logf("AFTER optimization:")
+	t.Logf("  Instruction 0: %s, offset: 0x%04x", section.Instructions[0].Raw, section.Instructions[0].Offset)
+	t.Logf("  Instruction 1: %s, offset: 0x%04x", section.Instructions[1].Raw, section.Instructions[1].Offset)
+	t.Logf("  Instruction 2: %s, offset: 0x%04x", section.Instructions[2].Raw, section.Instructions[2].Offset)
+
+	t.Logf("Offset analysis:")
+	t.Logf("  Store instruction 0 offset: 0x%04x", section.Instructions[0].Offset)
+	t.Logf("  Store instruction 2 offset: 0x%04x", section.Instructions[2].Offset)
+	t.Logf("  Offset difference: %d", int(section.Instructions[2].Offset)-int(section.Instructions[0].Offset))
+	t.Logf("  Expected for consecutive 8-bit stores: +1")
+
+	// Instructions should remain unchanged due to intervening jump and wrong order
+	if section.Instructions[0].Raw != originalInst0 {
+		t.Error("First store instruction should not be modified due to intervening jump")
+	}
+
+	if section.Instructions[1].Raw != originalInst1 {
+		t.Error("Jump instruction should not be modified")
+	}
+
+	if section.Instructions[2].Raw != originalInst2 {
+		t.Error("Second store instruction should not be modified due to intervening jump")
+	}
+
+	// Store instructions should not be converted to NOP (jump instruction can be NOP naturally)
+	if section.Instructions[0].IsNOP() {
+		t.Error("First store instruction should not be NOP when merge is blocked by jump")
+	}
+	if section.Instructions[2].IsNOP() {
+		t.Error("Second store instruction should not be NOP when merge is blocked by jump")
+	}
+}
