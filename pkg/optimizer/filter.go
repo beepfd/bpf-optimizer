@@ -58,6 +58,8 @@ func (s *Section) applyConstantPropagation() []int {
 		s.Dependencies[candIdx].DependedBy = make([]int, 0)
 	}
 
+	s.StoreCandidates = storeCandidates
+
 	return storeCandidates
 }
 
@@ -105,7 +107,7 @@ func (s *Section) applyPeepholeOptimization() {
 }
 
 // applySuperwordMerge implements superword-level merge optimization
-func (s *Section) applySuperwordMerge(storeCandidates []int) {
+func (s *Section) applySuperwordMerge() {
 	merger := NewSuperwordMerger(s)
-	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+	merger.ApplySuperwordMergeWithCandidates()
 }

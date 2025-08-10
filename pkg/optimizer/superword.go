@@ -139,7 +139,7 @@ func (sm *SuperwordMerger) analyse(group []MemoryOperation) [][]int {
 	// Implement Python's double loop logic
 	processed := make([]bool, len(dsts))
 
-	for j := 0; j < len(dsts); j++ {
+    for j := 0; j < len(dsts); j++ {
 		if processed[j] {
 			continue
 		}
@@ -147,7 +147,6 @@ func (sm *SuperwordMerger) analyse(group []MemoryOperation) [][]int {
 		dst := dsts[j]
 		off := offs[j]
 		size := sizes[j]
-		cap := getCap(off)
 
 		currentGroup := []int{}
 		currentGroup = append(currentGroup, indices[j])
@@ -161,8 +160,7 @@ func (sm *SuperwordMerger) analyse(group []MemoryOperation) [][]int {
 
 			if dst == dsts[k] &&
 				off+int16(size/8) == offs[k] &&
-				size == sizes[k] &&
-				size*(k-j+1) <= cap {
+                size == sizes[k] {
 				// Update offset for next iteration
 				off = offs[k]
 				currentGroup = append(currentGroup, indices[k])
@@ -237,7 +235,7 @@ func (sm *SuperwordMerger) hasInterveningJumpOrLoad(start, end int) bool {
 		class := opcode & 0x07
 
 		// Check for BPF_LDX, BPF_JMP, and BPF_JMP32 (matching Python logic)
-		if class == bpf.BPF_LDX || class == bpf.BPF_JMP || class == 0x06 { // BPF_JMP32 = 0x06
+		if class == bpf.BPF_LDX || class == bpf.BPF_JMP || class == bpf.BPF_JMP32 {
 			return true
 		}
 	}
@@ -290,8 +288,8 @@ func isSubset(a, b []int) bool {
 }
 
 // ApplySuperwordMergeWithCandidates implements superword merge with provided store candidates
-func (sm *SuperwordMerger) ApplySuperwordMergeWithCandidates(storeCandidates []int) {
-	sm.applySuperwordMergeWithCandidates(storeCandidates)
+func (sm *SuperwordMerger) ApplySuperwordMergeWithCandidates() {
+	sm.applySuperwordMergeWithCandidates(sm.section.StoreCandidates)
 }
 
 // applySuperwordMergeWithCandidates internal implementation
@@ -332,7 +330,7 @@ func (sm *SuperwordMerger) applySuperwordMergeWithCandidates(storeCandidates []i
 			opcode := inst.Opcode
 			class := opcode & 0x07
 
-			if class == bpf.BPF_LDX || class == bpf.BPF_JMP || class == 0x06 { // BPF_JMP32
+			if class == bpf.BPF_LDX || class == bpf.BPF_JMP || class == bpf.BPF_JMP32 {
 				// Stop updating and start analyzing current candidate list
 				if len(group) >= 2 {
 					candidates := sm.analyseGroup(group, indices)
@@ -377,10 +375,41 @@ func (sm *SuperwordMerger) applyMerges(candidates [][]int) {
 			continue
 		}
 
-		// Get the original size and calculate new size
-		firstInst := sm.section.Instructions[candidate[0]]
-		size := getSize(firstInst)
-		newSize := size * len(candidate)
+        // Normalize candidate order (ascending index)
+        sort.Ints(candidate)
+
+        // Basic validation: same dst reg, same element size, consecutive offsets, and no barrier
+        firstInst := sm.section.Instructions[candidate[0]]
+        elemSize := getSize(firstInst)
+        dstReg := firstInst.DstReg
+        prevOff := firstInst.Offset
+        valid := true
+        for i := 1; i < len(candidate); i++ {
+            inst := sm.section.Instructions[candidate[i]]
+            if inst.DstReg != dstReg || getSize(inst) != elemSize {
+                valid = false
+                break
+            }
+            if inst.Offset != prevOff+int16(elemSize/8) {
+                valid = false
+                break
+            }
+            prevOff = inst.Offset
+        }
+        // Barrier check across the whole span
+        if valid {
+            start := candidate[0]
+            end := candidate[len(candidate)-1]
+            if sm.hasInterveningJumpOrLoad(start, end) {
+                valid = false
+            }
+        }
+        if !valid {
+            continue
+        }
+
+        // Calculate new merged size
+        newSize := elemSize * len(candidate)
 
 		// Validate new size
 		if newSize != 16 && newSize != 32 && newSize != 64 {
@@ -389,31 +418,23 @@ func (sm *SuperwordMerger) applyMerges(candidates [][]int) {
 
 		// Build new immediate value
 		newImm := ""
-		for _, idx := range candidate {
+        for _, idx := range candidate {
 			inst := sm.section.Instructions[idx]
 			// Extract immediate value from instruction
-			immLen := size / 4
+            immLen := elemSize / 4
 			if len(inst.Raw) >= 8+immLen {
 				newImm += inst.Raw[8 : 8+immLen]
 			}
 		}
 
-		// Validate immediate value length
-		if len(newImm) > 8 {
-			// Check if high bits are zero
-			if len(newImm) > 8 {
-				highBits := newImm[8:]
-				if highBits != "00000000"[:len(highBits)] {
-					continue
-				}
-			}
-			newImm = newImm[:8]
-		} else {
-			// Pad with zeros
-			for len(newImm) < 8 {
-				newImm += "0"
-			}
-		}
+        // Normalize immediate to 8 hex chars (lower 32 bits), pad/truncate as needed
+        if len(newImm) < 8 {
+            for len(newImm) < 8 {
+                newImm += "0"
+            }
+        } else if len(newImm) > 8 {
+            newImm = newImm[:8]
+        }
 
 		// Create new instruction
 		newSizeMask := getSizeMask(newSize)

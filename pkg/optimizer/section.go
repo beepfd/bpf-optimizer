@@ -15,6 +15,8 @@ type Section struct {
 	Instructions     []*bpf.Instruction
 	Dependencies     []DependencyInfo // dependency information for each instruction
 	ControlFlowGraph *ControlFlowGraph
+
+	StoreCandidates []int
 }
 
 // DependencyInfo tracks dependencies for an instruction
@@ -135,7 +137,7 @@ func (s *Section) applyOptimizations() {
 	s.applyConstantPropagation()
 	s.applyCompaction()
 	s.applyPeepholeOptimization()
-	//s.applySuperwordMerge(storeCandidates)
+	s.applySuperwordMerge()
 
 	if s.Name == "uprobe" && len(s.Instructions) > 4810 {
 		fmt.Printf("DEBUG: After optimization - 4810: %s, 4811: %s, 4812: %s, 4813: %s\n",

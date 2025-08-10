@@ -303,7 +303,7 @@ func TestApplySuperwordMergeIntegration(t *testing.T) {
 	section := createTestSection(instructions)
 	merger := NewSuperwordMerger(section)
 
-	merger.ApplySuperwordMergeWithCandidates(nil)
+	merger.ApplySuperwordMergeWithCandidates()
 
 	// Check that instructions 0 and 1 were merged
 	if section.Instructions[0].IsNOP() {
@@ -339,7 +339,7 @@ func TestApplySuperwordMergeNoMerge(t *testing.T) {
 	originalInst1 := section.Instructions[1].Raw
 
 	merger := NewSuperwordMerger(section)
-	merger.ApplySuperwordMergeWithCandidates(nil)
+	merger.ApplySuperwordMergeWithCandidates()
 
 	// Check that instructions were not modified
 	if section.Instructions[0].Raw != originalInst0 {
@@ -457,7 +457,8 @@ func TestSuperwordMergeBugReproduction(t *testing.T) {
 
 	// Apply superword merge with store candidates (indices 0 and 2)
 	storeCandidates := []int{0, 2}
-	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+	merger.section.StoreCandidates = storeCandidates
+	merger.ApplySuperwordMergeWithCandidates()
 
 	t.Logf("Before optimization:")
 	t.Logf("  Instruction 0: %s", originalInst0)
@@ -519,7 +520,8 @@ func TestSuperwordMergeWithInterveningJump(t *testing.T) {
 
 	// Apply superword merge with store candidates
 	storeCandidates := []int{0, 2}
-	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+	merger.section.StoreCandidates = storeCandidates
+	merger.ApplySuperwordMergeWithCandidates()
 
 	t.Logf("After optimization:")
 	t.Logf("  Instruction 0: %s (IsNOP: %t, expected: %s)", section.Instructions[0].Raw, section.Instructions[0].IsNOP(), originalInst0)
@@ -565,7 +567,8 @@ func TestSuperwordMergeNonConsecutiveOffsets(t *testing.T) {
 
 	// Apply superword merge with store candidates
 	storeCandidates := []int{0, 1}
-	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+	merger.section.StoreCandidates = storeCandidates
+	merger.ApplySuperwordMergeWithCandidates()
 
 	// Instructions should remain unchanged due to non-consecutive offsets
 	if section.Instructions[0].Raw != originalInst0 {
@@ -608,7 +611,8 @@ func TestSuperwordMergeIssue21SpecificOffsets(t *testing.T) {
 
 	// Apply superword merge with store candidates (indices 0 and 2, skipping jump at 1)
 	storeCandidates := []int{0, 2}
-	merger.ApplySuperwordMergeWithCandidates(storeCandidates)
+	merger.section.StoreCandidates = storeCandidates
+	merger.ApplySuperwordMergeWithCandidates()
 
 	t.Logf("AFTER optimization:")
 	t.Logf("  Instruction 0: %s, offset: 0x%04x", section.Instructions[0].Raw, section.Instructions[0].Offset)

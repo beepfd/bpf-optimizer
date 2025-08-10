@@ -110,8 +110,11 @@ debug-server: debug
 	@echo "🔧 启动调试服务器..."
 	@echo "调试服务器将在 :2345 端口启动"
 	@echo "可以在另一个终端或VS Code中连接到此服务器"
-	dlv --listen=:2345 --headless=true --api-version=2 --accept-multiclient exec ./$(BUILD_DIR)/$(BINARY_NAME)-debug \
-	-- -input /root/workload/tetragon/bpf/objs/bpf_generic_uprobe_v61.o -output test_optimized.o
+	dlv --headless --listen=:2345 --api-version=2 exec ./$(BUILD_DIR)/$(BINARY_NAME)-debug \
+	-- -input /root/workload/tetragon/bpf/objs/bpf_generic_uprobe_v61.o -output-dir .
+
+run: debug
+	./$(BUILD_DIR)/$(BINARY_NAME)-debug -input /root/workload/tetragon/bpf/objs/bpf_generic_uprobe_v61.o -output-dir .
 
 # 交互式调试
 debug-interactive: debug
