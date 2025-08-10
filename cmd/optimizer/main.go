@@ -4,22 +4,25 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
-	"net/http"
 	_ "net/http/pprof"
 
 	"github.com/beepfd/bpf-optimizer/pkg/optimizer"
 )
 
 var (
-	inputFile  = flag.String("input", "", "Input BPF object file (.o)")
-	outputFile = flag.String("output", "", "Output optimized BPF object file (.o)")
-	verbose    = flag.Bool("verbose", false, "Verbose output")
-	stats      = flag.Bool("stats", false, "Show optimization statistics")
-	help       = flag.Bool("help", false, "Show help message")
-	version    = flag.Bool("version", false, "Show version information")
+	inputFile = flag.String("input", "", "Input BPF object file (.o)")
+	inputDir  = flag.String("input-dir", "", "Input directory of BPF object files (.o)")
+	outputDir = flag.String("output-dir", "", "Output directory of optimized BPF object files (.o)")
+	verbose   = flag.Bool("verbose", false, "Verbose output")
+	stats     = flag.Bool("stats", false, "Show optimization statistics")
+	help      = flag.Bool("help", false, "Show help message")
+	version   = flag.Bool("version", false, "Show version information")
 )
 
 const (
@@ -29,6 +32,11 @@ const (
 
 func main() {
 	flag.Parse()
+
+	// add pprof
+	go func() {
+		http.ListenAndServe("0.0.0.0:6060", nil)
+	}()
 
 	// Show help
 	if *help {
@@ -45,35 +53,77 @@ func main() {
 	}
 
 	// Validate arguments
-	if *inputFile == "" {
-		fmt.Fprintf(os.Stderr, "错误: 必须指定输入文件\n")
+	if *inputFile == "" && *inputDir == "" {
+		fmt.Fprintf(os.Stderr, "错误: 必须指定输入文件或者目录\n")
 		showUsage()
 		os.Exit(1)
 	}
 
-	if *outputFile == "" {
+	if *inputFile != "" && *inputDir != "" {
+		fmt.Fprintf(os.Stderr, "错误: 不能同时指定输入文件和输入目录\n")
+		showUsage()
+		os.Exit(1)
+	}
+
+	if *outputDir == "" {
 		// Default output file
-		*outputFile = *inputFile + ".optimized"
+		*outputDir = *inputDir
 	}
 
-	// Check if input file exists
-	if _, err := os.Stat(*inputFile); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "错误: 输入文件 '%s' 不存在\n", *inputFile)
-		os.Exit(1)
+	if *inputFile != "" {
+		// Check if input file exists
+		if _, err := os.Stat(*inputFile); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "错误: 输入文件 '%s' 不存在\n", *inputFile)
+			os.Exit(1)
+		}
+
+		outputFile := *outputDir + "/" + filepath.Base(*inputFile)
+
+		// Perform optimization
+		if err := optimizeBPF(*inputFile, outputFile); err != nil {
+			fmt.Fprintf(os.Stderr, "优化失败: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("✓ 优化完成: %s -> %s\n", *inputFile, outputFile)
+		return
 	}
 
-	// add pprof
-	go func() {
-		http.ListenAndServe("0.0.0.0:6060", nil)
-	}()
+	if *inputDir != "" {
+		// Check if input directory exists
+		if _, err := os.Stat(*inputDir); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "错误: 输入目录 '%s' 不存在\n", *inputDir)
+			os.Exit(1)
+		}
 
-	// Perform optimization
-	if err := optimizeBPF(*inputFile, *outputFile); err != nil {
-		fmt.Fprintf(os.Stderr, "优化失败: %v\n", err)
-		os.Exit(1)
+		files, err := os.ReadDir(*inputDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "错误: 读取输入目录失败: %v\n", err)
+			os.Exit(1)
+		}
+
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+
+			if !strings.HasSuffix(file.Name(), ".o") {
+				continue
+			}
+
+			inputFile := strings.Join([]string{*inputDir, file.Name()}, "/")
+			outputFile := strings.Join([]string{*outputDir, file.Name()}, "/")
+
+			fmt.Printf("start optimize %s\n", inputFile)
+			if err := optimizeBPF(inputFile, outputFile); err != nil {
+				fmt.Fprintf(os.Stderr, "优化失败: %v\n", err)
+				continue
+			}
+
+			fmt.Printf("✓ optimize done: %s -> %s\n", inputFile, outputFile)
+		}
 	}
 
-	fmt.Printf("✓ 优化完成: %s -> %s\n", *inputFile, *outputFile)
 }
 
 func optimizeBPF(inputPath, outputPath string) error {
