@@ -139,7 +139,7 @@ func (sm *SuperwordMerger) analyse(group []MemoryOperation) [][]int {
 	// Implement Python's double loop logic
 	processed := make([]bool, len(dsts))
 
-    for j := 0; j < len(dsts); j++ {
+	for j := 0; j < len(dsts); j++ {
 		if processed[j] {
 			continue
 		}
@@ -147,6 +147,8 @@ func (sm *SuperwordMerger) analyse(group []MemoryOperation) [][]int {
 		dst := dsts[j]
 		off := offs[j]
 		size := sizes[j]
+		// Get capacity based on the first instruction's offset (matching Python logic)
+		cap := getCap(off)
 
 		currentGroup := []int{}
 		currentGroup = append(currentGroup, indices[j])
@@ -158,9 +160,13 @@ func (sm *SuperwordMerger) analyse(group []MemoryOperation) [][]int {
 				continue
 			}
 
+			// Check capacity constraint: size * (k-j+1) <= cap (matching Python logic)
+			// (k-j+1) represents number of instructions from j to k inclusive
+			numInstructions := (k - j + 1)
 			if dst == dsts[k] &&
 				off+int16(size/8) == offs[k] &&
-                size == sizes[k] {
+				size == sizes[k] &&
+				size*numInstructions <= cap {
 				// Update offset for next iteration
 				off = offs[k]
 				currentGroup = append(currentGroup, indices[k])
@@ -209,6 +215,7 @@ func (sm *SuperwordMerger) analyseGroup(group []string, indices []int) [][]int {
 }
 
 // processGroup processes a group of indices and adds appropriate candidates
+// This matches the Python implementation's grouping strategy
 func (sm *SuperwordMerger) processGroup(group []int, candidates *[][]int) {
 	groupLen := len(group)
 
@@ -229,12 +236,11 @@ func (sm *SuperwordMerger) hasInterveningJumpOrLoad(start, end int) bool {
 	for i := start + 1; i < end; i++ {
 		inst := sm.section.Instructions[i]
 
-		// Don't skip any instructions when checking for jumps/loads
-		// Even "NOP" instructions like "0500000000000000" are actually jump instructions
 		opcode := inst.Opcode
 		class := opcode & 0x07
 
 		// Check for BPF_LDX, BPF_JMP, and BPF_JMP32 (matching Python logic)
+		// Note: Don't skip NOP instructions - even NOP jumps are barriers
 		if class == bpf.BPF_LDX || class == bpf.BPF_JMP || class == bpf.BPF_JMP32 {
 			return true
 		}
@@ -325,11 +331,10 @@ func (sm *SuperwordMerger) applySuperwordMergeWithCandidates(storeCandidates []i
 		for j := currentIdx + 1; j < nextIdx; j++ {
 			inst := sm.section.Instructions[j]
 
-			// Don't skip any instructions when checking for jumps/loads
-			// Even "NOP" instructions like "0500000000000000" are actually jump instructions
 			opcode := inst.Opcode
 			class := opcode & 0x07
 
+			// Don't skip NOP instructions - even NOP jumps are barriers
 			if class == bpf.BPF_LDX || class == bpf.BPF_JMP || class == bpf.BPF_JMP32 {
 				// Stop updating and start analyzing current candidate list
 				if len(group) >= 2 {
@@ -375,66 +380,70 @@ func (sm *SuperwordMerger) applyMerges(candidates [][]int) {
 			continue
 		}
 
-        // Normalize candidate order (ascending index)
-        sort.Ints(candidate)
+		// Normalize candidate order (ascending index)
+		sort.Ints(candidate)
 
-        // Basic validation: same dst reg, same element size, consecutive offsets, and no barrier
-        firstInst := sm.section.Instructions[candidate[0]]
-        elemSize := getSize(firstInst)
-        dstReg := firstInst.DstReg
-        prevOff := firstInst.Offset
-        valid := true
-        for i := 1; i < len(candidate); i++ {
-            inst := sm.section.Instructions[candidate[i]]
-            if inst.DstReg != dstReg || getSize(inst) != elemSize {
-                valid = false
-                break
-            }
-            if inst.Offset != prevOff+int16(elemSize/8) {
-                valid = false
-                break
-            }
-            prevOff = inst.Offset
-        }
-        // Barrier check across the whole span
-        if valid {
-            start := candidate[0]
-            end := candidate[len(candidate)-1]
-            if sm.hasInterveningJumpOrLoad(start, end) {
-                valid = false
-            }
-        }
-        if !valid {
-            continue
-        }
+		// Validation similar to Python but keeping some Go safety checks
+		firstInst := sm.section.Instructions[candidate[0]]
+		elemSize := getSize(firstInst)
+		dstReg := firstInst.DstReg
 
-        // Calculate new merged size
-        newSize := elemSize * len(candidate)
+		// Basic consistency checks (similar to Python's analyse function)
+		valid := true
+		for i := 1; i < len(candidate); i++ {
+			inst := sm.section.Instructions[candidate[i]]
+			if inst.DstReg != dstReg || getSize(inst) != elemSize {
+				valid = false
+				break
+			}
+		}
 
-		// Validate new size
+		// Check for barriers between instructions (matching Python)
+		if valid {
+			start := candidate[0]
+			end := candidate[len(candidate)-1]
+			if sm.hasInterveningJumpOrLoad(start, end) {
+				valid = false
+			}
+		}
+
+		if !valid {
+			continue
+		}
+
+		// Calculate new merged size
+		newSize := elemSize * len(candidate)
+
+		// Validate new size (must be valid BPF size)
 		if newSize != 16 && newSize != 32 && newSize != 64 {
 			continue
 		}
 
-		// Build new immediate value
+		// Build new immediate value (matching Python logic)
 		newImm := ""
-        for _, idx := range candidate {
+		for _, idx := range candidate {
 			inst := sm.section.Instructions[idx]
 			// Extract immediate value from instruction
-            immLen := elemSize / 4
+			immLen := elemSize / 4
 			if len(inst.Raw) >= 8+immLen {
 				newImm += inst.Raw[8 : 8+immLen]
 			}
 		}
 
-        // Normalize immediate to 8 hex chars (lower 32 bits), pad/truncate as needed
-        if len(newImm) < 8 {
-            for len(newImm) < 8 {
-                newImm += "0"
-            }
-        } else if len(newImm) > 8 {
-            newImm = newImm[:8]
-        }
+		// Handle immediate value based on new size (different from Python logic)
+		// For merging different stores, we keep the concatenated immediate
+		if newSize == 64 {
+			// For 64-bit stores, we can use up to 8 hex chars (32-bit immediate)
+			// But we keep only the first immediate value for now
+			if len(newImm) > 8 {
+				newImm = newImm[:8]
+			}
+		}
+
+		// Pad with zeros to reach 8 characters
+		for len(newImm) < 8 {
+			newImm += "0"
+		}
 
 		// Create new instruction
 		newSizeMask := getSizeMask(newSize)
